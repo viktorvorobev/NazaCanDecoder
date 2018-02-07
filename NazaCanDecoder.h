@@ -5,17 +5,19 @@
 #include <linux/can/raw.h>
 #include <sys/socket.h>		// для работы с сокетами
 #include <sys/types.h>
-#include <sys/socket.h>
 #include <sys/ioctl.h>		// низкоуровневая работа с интерфейсами
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <net/if.h>
 
-#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+
+#include <thread>
+#include <chrono>
+#include <math.h>
 
 // Получение сообщений от контроллера заряда батарей
 #define GET_SMART_BATTERY_DATA
@@ -45,6 +47,7 @@ public:
 	int InitCanSocket(int *socket, const char* interface);	// создание CAN сокета
 	uint16_t Decode();	// декодировать входящее CAN сообщение, если есть (должно вызываться в цикле)
 	void Heartbeat();	// периодически (раз в 2 секунды) шлет heartbeat сообщение контроллеру
+	bool exit = true;	// флаг, по которому будем завершать треды
 	// функции возвращающие значения
 	double GetLatitude();	// возвращает широту в градусах
 	double GetLongitude();	// возвращает долготу в градусах

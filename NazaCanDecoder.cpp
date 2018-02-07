@@ -4,18 +4,25 @@ NazaCanDecoder::NazaCanDecoder(const char* canBus)	// конструктор к�
 {
 	// создаем HeartBeat сообщения
 	HEARTBEAT_1.can_id = 0x108;
+	int data1[8] = {0x55, 0xAA, 0x55, 0xAA, 0x07, 0x10, 0x00, 0x00};
+	memcpy(HEARTBEAT_1.data, data1, sizeof(data1));
 	HEARTBEAT_1.can_dlc = 8;
-	HEARTBEAT_1.data[8] = {0x55, 0xAA, 0x55, 0xAA, 0x07, 0x10, 0x00, 0x00};
+
 	HEARTBEAT_2.can_id = 0x108;
+	int data2[4] = {0x66, 0xCC, 0x66, 0xCC};
+	memcpy(HEARTBEAT_2.data, data2, sizeof(data2));
 	HEARTBEAT_2.can_dlc = 4;
-	HEARTBEAT_2.data[4] = {0x66, 0xCC, 0x66, 0xCC};
+
 	// создаем маски
 //	FILTER_MASK.can_id = 0x7FF;
 //	FILTER_090.can_id = 0x090;
 //	FILTER_108.can_id = 0x108;
 //	FILTER_7F8.can_id = 0x7F8;
 
-	InitCanSocket(&canSocket, canBus);	// инициализируем CAN
+	if(InitCanSocket(&canSocket, canBus) != 0)	// инициализируем CAN
+		perror("Error initialization CAN bus");
+	exit = false;
+	Begin();
 }
 
 int NazaCanDecoder::InitCanSocket(int *sock, const char* interface)	// инициализация CAN
@@ -42,6 +49,25 @@ int NazaCanDecoder::InitCanSocket(int *sock, const char* interface)	// иниц�
 	}
 	(*sock) = s;
 	return 0;
+}
+
+void NazaCanDecoder::Heartbeat()
+{
+	while (exit != false)
+	{
+		struct can_frame frame;
+		frame = HEARTBEAT_1;
+		write(canSocket, &frame, sizeof(struct can_frame));
+		frame = HEARTBEAT_2;
+		write(canSocket, &frame, sizeof(struct can_frame));
+		std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+	}
+}
+
+void NazaCanDecoder::Begin()
+{
+	std::thread thr1(Heartbeat);
+	thr1.detach();
 }
 
 // функции, возвращающие значения
