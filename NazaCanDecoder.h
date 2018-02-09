@@ -1,6 +1,7 @@
 #ifndef NAZACANDECODER_H_
 #define NAZACANDECODER_H_
 
+#include <python3.5/Python.h>
 #include <linux/can.h>		// для работы с can
 #include <linux/can/raw.h>
 #include <sys/socket.h>		// для работы с сокетами
@@ -10,14 +11,14 @@
 #include <netinet/in.h>
 #include <net/if.h>
 
-#include <stdio.h>
-#include <string.h>
-#include <errno.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <string>
+#include <cerrno>
+#include <cstdlib>
 
 #include <thread>
 #include <chrono>
-#include <math.h>
+#include <cmath>
 
 // Получение сообщений от контроллера заряда батарей
 #define GET_SMART_BATTERY_DATA
@@ -32,22 +33,26 @@
 #define NAZA_MESSAGE_MSG0926	0x0926
 #endif
 
-class NazaCanDecoder
-{
-public:
+//class NazaCanDecoder
+//{
+//public:
 	typedef enum {NO_FIX = 0, FIX_2D = 2, FIX_3D = 3, FIX_DGPS = 4} fixType_t;	// тип фиксации GPS
-	typedef enum {MANUAL = 0, GPS = 1, FAILSAFE = 2, ATTI = 3} mode_t;			// режим полета
+	typedef enum {MANUAL = 0, GPS = 1, FAILSAFE = 2, ATTI = 3} flyMode_t;			// режим полета
 	typedef enum {MOTOR_M1 = 0, MOTOR_M2 = 1, MOTOR_M3 = 2, MOTOR_M4 = 3,
 				  MOTOR_M5 = 4, MOTOR_M6 = 5, MOTOR_F1 = 6, MOTOR_F2 = 7} motorOut_t;	// индексы выходных сигналов моторов
 	typedef enum {RC_UNUSED_1 = 0, RC_A = 1, RC_E = 2,
 				  RC_R = 3, RC_U = 4, RC_T = 5, RC_UNUSED_2 = 6,
 				  RC_X1 = 7, RC_X2 = 8, RC_UNUSED_3 = 9} rcInChan_t;			// индексы каналов управления
-	NazaCanDecoder(const char* canBus);	// конструктор
-	void Begin();		// запуск класса
+//	void NazaCanDecoder(const char* canBus);	// конструктор
+	int Begin(const char* canBus);		// запуск класса
 	int InitCanSocket(int *socket, const char* interface);	// создание CAN сокета
+	void DebugThread();
+	uint8_t debugCounter;
+	uint8_t GetDebugCounter();
+    void Stop();        // функция, останавливающая треды
 	uint16_t Decode();	// декодировать входящее CAN сообщение, если есть (должно вызываться в цикле)
 	void Heartbeat();	// периодически (раз в 2 секунды) шлет heartbeat сообщение контроллеру
-	bool exit = true;	// флаг, по которому будем завершать треды
+	bool stop = true;	// флаг, по которому будем завершать треды
 	// функции возвращающие значения
 	double GetLatitude();	// возвращает широту в градусах
 	double GetLongitude();	// возвращает долготу в градусах
@@ -74,14 +79,14 @@ public:
 	uint16_t GetBattery();	// возвращает напряжение батарейки в мВ
 	uint16_t GetMotorOutput(motorOut_t mot);	// возвращает значение подаваемое на мотор (0 - не используется, иначе 16920~35000, 16920 = мотор выкл)
 	int16_t GetRcIn(rcInChan_t chan);		// возвращает значение получаемое от джойстика для каждого канала (-1000~1000)
-	mode_t GetMode();	// возвращает текущий режим работы
+	flyMode_t GetMode();	// возвращает текущий режим работы
 #ifdef GET_SMART_BATTERY_DATA
 	typedef enum {CELL_1 = 0, CELL_2 = 1, CELL_3 = 2, } smartBatteryCell_t;	// индексы банок контроллера заряда
 	uint8_t GetBatteryPercent();	// возвращает заряд батареи в процентах
 	uint16_t GetBatteryCell(smartBatteryCell_t cell);	// возвращает напряжение банки в мВ
 #endif
 
-private:
+//private:
 	// заголовок общий для всех сообщений
 	typedef struct __attribute__((packed))
 	{
@@ -259,12 +264,12 @@ private:
 	uint16_t battery = 0;	// напряжение аккумулятора (мВ)
 	uint16_t motorOut[8];	// выходное значение для моторов (0 - не используется, иначе 16920~35000, 16920 = мотор выкл)
 	int16_t rcIn[10];	// входное значение с пульта управления (-1000~1000)
-	mode_t mode = FAILSAFE;		// режим полета
+	flyMode_t mode = FAILSAFE;		// режим полета
 #ifdef GET_SMART_BATTERY_DATA
 	uint8_t batteryPercent = 0;		// заряд аккумулятора (%)
 	uint16_t batteryCell[3];	// напряжение каждой ячейки (мВ)
 #endif
-};
+//};
 
 
 #endif /* NAZACANDECODER_H_ */
