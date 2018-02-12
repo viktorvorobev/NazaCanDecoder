@@ -1,43 +1,77 @@
-#include <unistd.h>
 #include "NazaCanDecoder.h"
+
+/*
+ * Работа модуля.
+ * Модуль работает в нескольких потоках (тредах):
+ * 1) Отправка HeartBeat в CAN сеть.
+ * 2) Получение сообщений из CAN сети, их парсинг.
+ */
 
 int InitCanSocket(int *sock, const char* interface)	// инициализация CAN
 {
-	int s;
+	int s, n;
 	struct sockaddr_can addr{};
 	struct ifreq ifr{};
-	s = socket(PF_CAN, SOCK_RAW, CAN_RAW);
-	if(s < 0)
+    bool noSuchInterface = true;    // флаг, что интерфейс вообще есть
+    struct ifaddrs *ifaddr, *ifa;
+
+    if (getifaddrs(&ifaddr) == -1)  // получаем список всех интерфейсов
+    {
+        perror("ERROR: Failed to get ifaddrs.");
+        return -1;
+    }
+    for (ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)    // ищем нужный интерфейс
+    {
+        //TODO: правильно описать сравнение строк
+        if (strcmp(interface, ifa->ifa_name))   //если нашли - меняем флаг
+            noSuchInterface = false;
+        else continue;
+    }
+
+    if (noSuchInterface)    // Ошибка что интерфейс не найден
+    {
+        printf("ERROR: No interface with name %s found.", interface);
+        perror("ERROR: No interface with that name found.");
+        return -2;
+    }
+
+	if((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) // открываем порт
 	{
-		perror("Error while opening socket");
-		return -1;
+		perror("ERROR: Failed to open port.");
+		return -3;
 	}
 	strcpy(ifr.ifr_name, interface);
 	ioctl(s, SIOCGIFINDEX, &ifr);
 
 	addr.can_family = AF_CAN;
 	addr.can_ifindex = ifr.ifr_ifindex;
-
-	if(bind(s, (struct sockaddr *)&addr, sizeof(addr)) < 0)
+    int b = bind(s, (struct sockaddr *)&addr, sizeof(addr));    // занимаем порт
+	if(b != 0)
 	{
-		perror("Error in socket bind");
-		return -1;
+//        std::cout << "Error binding socket\n";
+		perror("ERROR: Failed to bind socket.");
+		return -4;
 	}
+
+
 	(*sock) = s;
+    std::cout << "Socket inited\n";
 	return 0;
 }
 
 void Heartbeat()
 {
+    std::cout << "Heartbeat started\n";
 	while (!stop)
 	{
-		struct can_frame frame{};
+        struct can_frame frame{};
 		frame = HEARTBEAT_1;
 		write(canSocket, &frame, sizeof(struct can_frame));
 		frame = HEARTBEAT_2;
 		write(canSocket, &frame, sizeof(struct can_frame));
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 	}
+    std::cout << "Heartbeat stopped\n";
 }
 
 int Begin(const char* canBus)
@@ -70,13 +104,15 @@ int Begin(const char* canBus)
 //	FILTER_090.can_id = 0x090;
 //	FILTER_108.can_id = 0x108;
 //	FILTER_7F8.can_id = 0x7F8;
-
+    std::cout << "Initing CAN socket\n";
 	if(InitCanSocket(&canSocket, canBus) != 0)	// инициализируем CAN
     {
+        std::cout << "Error initing CAN bus \n";
         perror("Error initialization CAN bus");
         return -1;
     }
 	stop = false;
+    std::cout << "Starting threads\n";
 	std::thread thr1(Heartbeat);
     std::thread thr2(DebugThread);
 	thr1.detach();
@@ -84,18 +120,22 @@ int Begin(const char* canBus)
     return 0;
 }
 
-void Stop()
+int Stop()
 {
+    std::cout << "Stopping threads\n";
     stop = true;
+    return 0;
 }
 
 void DebugThread()
 {
+    std::cout << "Debug counter started\n";
     while(!stop)
     {
         debugCounter += 1;
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
+    std::cout << "Debug counter stopped\n";
 }
 
 // функции, возвращающие значения
@@ -139,7 +179,7 @@ static PyObject * NazaCanDecoder_Begin(PyObject *self, PyObject *args)  // ме�
     int ret;    // результат выполнения функции Begin
     if(!PyArg_ParseTuple(args, "s", &canBus)) return NULL;  // пробуем парсить строку
     ret = Begin(canBus);
-    if(ret < 0) // смотрим на результат выполнения команды
+    if(ret != 0) // смотрим на результат выполнения команды
     {
         PyErr_SetString(NCDError, "Begin failed");
         return NULL;
@@ -156,25 +196,26 @@ static PyObject * NazaCanDecoder_GetDebugCounter(PyObject *self, PyObject *args)
 
 static PyObject * NazaCanDecoder_Stop(PyObject *self, PyObject *args)
 {
-    Stop();
+    int ret = Stop();
+    PyLong_FromLong(ret);
 }
 
 static PyMethodDef NazaCanDecoderMethods[] =    // методы модуля
-        {
-                {"Begin", NazaCanDecoder_Begin, METH_VARARGS, "Starting Naza-Can Decoder threads."},
-                {"GetDebugCounter", NazaCanDecoder_GetDebugCounter, METH_VARARGS, "Get Debug counter value"},
-                {"Stop", NazaCanDecoder_Stop, METH_VARARGS, "Stoping Naza Can Decoder threads."},
-                {NULL, NULL, 0, NULL}
-        };
+    {
+        {"Begin", NazaCanDecoder_Begin, METH_VARARGS, "Starting Naza-Can Decoder threads."},
+        {"GetDebugCounter", NazaCanDecoder_GetDebugCounter, METH_VARARGS, "Get Debug counter value"},
+        {"Stop", NazaCanDecoder_Stop, METH_VARARGS, "Stoping Naza Can Decoder threads."},
+        {NULL, NULL, 0, NULL}
+    };
 
 static struct PyModuleDef NazaCanDecoderModule =    // описание модуля
-        {
-                PyModuleDef_HEAD_INIT,
-                "NazaCanDecoder",
-                NULL,
-                -1,
-                NazaCanDecoderMethods
-        };
+    {
+        PyModuleDef_HEAD_INIT,
+        "NazaCanDecoder",
+        NULL,
+        -1,
+        NazaCanDecoderMethods
+    };
 
 PyMODINIT_FUNC
 PyInit_NazaCanDecoder() // инициализация модуля

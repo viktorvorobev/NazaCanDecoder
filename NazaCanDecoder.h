@@ -1,7 +1,7 @@
 #ifndef NAZACANDECODER_H_
 #define NAZACANDECODER_H_
 
-#include <python3.5/Python.h>
+#include <python3.5/Python.h>   // для работы с Python3
 #include <linux/can.h>		// для работы с can
 #include <linux/can/raw.h>
 #include <sys/socket.h>		// для работы с сокетами
@@ -10,11 +10,14 @@
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <net/if.h>
+#include <ifaddrs.h>    // проверить существование сети
 
+#include <iostream>
 #include <cstdio>
 #include <string>
 #include <cerrno>
 #include <cstdlib>
+#include <unistd.h>
 
 #include <thread>
 #include <chrono>
@@ -49,7 +52,7 @@
 	void DebugThread();
 	uint8_t debugCounter;
 	uint8_t GetDebugCounter();
-    void Stop();        // функция, останавливающая треды
+    int Stop();        // функция, останавливающая треды
 	uint16_t Decode();	// декодировать входящее CAN сообщение, если есть (должно вызываться в цикле)
 	void Heartbeat();	// периодически (раз в 2 секунды) шлет heartbeat сообщение контроллеру
 	bool stop = true;	// флаг, по которому будем завершать треды
