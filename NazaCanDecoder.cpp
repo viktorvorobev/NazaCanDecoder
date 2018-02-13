@@ -21,17 +21,13 @@ int InitCanSocket(int *sock, const char* interface)	// инициализаци�
         return -1;
     }
     for (ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)    // ищем нужный интерфейс
-    {
-        //TODO: правильно описать сравнение строк
-        if (strcmp(interface, ifa->ifa_name))   //если нашли - меняем флаг
+        // если нашли нужный интерфейс, и он "поднят", меняем флаг - разрешаем дальнейшую работу
+        if ((!strcmp(interface, ifa->ifa_name)) && ifa->ifa_flags & IFF_UP)   // (strcmp: полное совпадение == 0)
             noSuchInterface = false;
-        else continue;
-    }
 
     if (noSuchInterface)    // Ошибка что интерфейс не найден
     {
-        printf("ERROR: No interface with name %s found.", interface);
-        perror("ERROR: No interface with that name found.");
+        perror("ERROR: Interface not found or down.");
         return -2;
     }
 
@@ -45,23 +41,21 @@ int InitCanSocket(int *sock, const char* interface)	// инициализаци�
 
 	addr.can_family = AF_CAN;
 	addr.can_ifindex = ifr.ifr_ifindex;
-    int b = bind(s, (struct sockaddr *)&addr, sizeof(addr));    // занимаем порт
-	if(b != 0)
+//    int b = bind(s, (struct sockaddr *)&addr, sizeof(addr));    // занимаем порт
+	if(bind(s, (struct sockaddr *)&addr, sizeof(addr)) != 0)
 	{
-//        std::cout << "Error binding socket\n";
 		perror("ERROR: Failed to bind socket.");
 		return -4;
 	}
 
-
 	(*sock) = s;
-    std::cout << "Socket inited\n";
+    printf("Socket inited\n");
 	return 0;
 }
 
 void Heartbeat()
 {
-    std::cout << "Heartbeat started\n";
+    printf("Heartbeat started\n");
 	while (!stop)
 	{
         struct can_frame frame{};
@@ -71,7 +65,7 @@ void Heartbeat()
 		write(canSocket, &frame, sizeof(struct can_frame));
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
 	}
-    std::cout << "Heartbeat stopped\n";
+    printf("Heartbeat stopped\n");
 }
 
 int Begin(const char* canBus)
@@ -104,15 +98,14 @@ int Begin(const char* canBus)
 //	FILTER_090.can_id = 0x090;
 //	FILTER_108.can_id = 0x108;
 //	FILTER_7F8.can_id = 0x7F8;
-    std::cout << "Initing CAN socket\n";
+    printf("Initialising CAN socket: \"%s\"...\n", canBus);
 	if(InitCanSocket(&canSocket, canBus) != 0)	// инициализируем CAN
     {
-        std::cout << "Error initing CAN bus \n";
-        perror("Error initialization CAN bus");
+        perror("ERROR: Failed to initialize can bus");
         return -1;
     }
 	stop = false;
-    std::cout << "Starting threads\n";
+    printf("Starting threads...\n");
 	std::thread thr1(Heartbeat);
     std::thread thr2(DebugThread);
 	thr1.detach();
@@ -122,20 +115,20 @@ int Begin(const char* canBus)
 
 int Stop()
 {
-    std::cout << "Stopping threads\n";
+    printf("Stopping threads...\n");
     stop = true;
     return 0;
 }
 
 void DebugThread()
 {
-    std::cout << "Debug counter started\n";
+    printf("Debug counter started\n");
     while(!stop)
     {
         debugCounter += 1;
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
-    std::cout << "Debug counter stopped\n";
+    printf("Debug counter stopped\n");
 }
 
 // функции, возвращающие значения
