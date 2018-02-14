@@ -222,7 +222,7 @@ typedef union
     naza_msg1002_t		msg1002;
     naza_msg1003_t		msg1003;
     naza_msg1009_t		msg1009;
-#ifdef GET_SMART_BATTERY_DATA
+//#ifdef GET_SMART_BATTERY_DATA
     naza_msg0926_t		msg0926;
 #endif
 } naza_msg_t;
@@ -235,12 +235,12 @@ struct can_frame HEARTBEAT_2;
 //	struct can_filter FILTER_090;
 //	struct can_filter FILTER_108;
 //	struct can_filter FILTER_7F8;
-uint8_t canMsgIdIndex = 0;	// индекс, которым будем разделять прилетающие сообщения
-char canMsgByte = 0;	// номер байта в сообщении
+uint8_t canMsgIdIdx = 0;	// индекс, которым будем разделять прилетающие сообщения
+uint8_t canMsgByte = 0;	// номер байта в сообщении
 
 naza_msg_t msgBuf[NAZA_MESSAGE_COUNT];	// буффер сообщений (сюда собираем сообщение перед тем как парсить)
 uint16_t msgLen[NAZA_MESSAGE_COUNT];	// ожидаемая длина сообщения
-uint16_t msgIndex[NAZA_MESSAGE_COUNT];	// текущий номер байта в сообщении
+uint16_t msgIdx[NAZA_MESSAGE_COUNT];	// текущий номер байта в сообщении
 uint8_t header[NAZA_MESSAGE_COUNT];		// флаги, по которым следим за начальной послдеовательностью
 uint8_t footer[NAZA_MESSAGE_COUNT];		// флаги, по которым следим за завершающей последовательностью
 uint8_t collectData[NAZA_MESSAGE_COUNT];	// флаги, по которым следим надо ли собирать сообщение в буффер
