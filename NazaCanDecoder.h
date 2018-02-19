@@ -222,7 +222,7 @@ typedef union
     naza_msg1002_t		msg1002;
     naza_msg1003_t		msg1003;
     naza_msg1009_t		msg1009;
-//#ifdef GET_SMART_BATTERY_DATA
+#ifdef GET_SMART_BATTERY_DATA
     naza_msg0926_t		msg0926;
 #endif
 } naza_msg_t;
