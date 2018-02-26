@@ -1,7 +1,8 @@
 #ifndef NAZACANDECODER_H_
 #define NAZACANDECODER_H_
 
-#include <python3.5/Python.h>   // для работы с Python3
+#include <python3.5/Python.h>   // для работы с Python3, подключается первой, тк может дальше что-то переопределить
+#include "python3.5/structmember.h"
 #include <linux/can.h>		// для работы с can
 #include <linux/can/raw.h>
 #include <sys/socket.h>		// для работы с сокетами
@@ -37,9 +38,6 @@
 #define NAZA_MESSAGE_MSG0926	0x0926
 #endif
 
-//class NazaCanDecoder
-//{
-//public:
 typedef enum {NO_FIX = 0, FIX_2D = 2, FIX_3D = 3, FIX_DGPS = 4} fixType_t;	// тип фиксации GPS
 typedef enum {MANUAL = 0, GPS = 1, FAILSAFE = 2, ATTI = 3} flyMode_t;			// режим полета
 typedef enum {MOTOR_M1 = 0, MOTOR_M2 = 1, MOTOR_M3 = 2, MOTOR_M4 = 3,
@@ -47,8 +45,8 @@ typedef enum {MOTOR_M1 = 0, MOTOR_M2 = 1, MOTOR_M3 = 2, MOTOR_M4 = 3,
 typedef enum {RC_UNUSED_1 = 0, RC_A = 1, RC_E = 2,
                 RC_R = 3, RC_U = 4, RC_T = 5, RC_UNUSED_2 = 6,
                 RC_X1 = 7, RC_X2 = 8, RC_UNUSED_3 = 9} rcInChan_t;			// индексы каналов управления
-//	void NazaCanDecoder(const char* canBus);	// конструктор
-int Begin(const char* canBus);		// запуск класса
+
+int Begin(const char* canBus);		// запуск всех потоков (threads) класса
 int InitCanSocket(int *socket, const char* interface);	// создание CAN сокета
 void ThreadDebug();
 void ThreadHeartbeat();	// периодически (раз в 2 секунды) шлет heartbeat сообщение контроллеру
@@ -95,7 +93,6 @@ uint8_t GetBatteryPercent();	// возвращает заряд батареи �
 uint16_t GetBatteryCell(smartBatteryCell_t cell);	// возвращает напряжение банки в мВ
 #endif
 
-//private:
 // заголовок общий для всех сообщений
 typedef struct __attribute__((packed))
 {
@@ -214,7 +211,7 @@ typedef struct __attribute__((packed))
 } naza_msg0926_t;
 #endif
 
-// структура содержащая все сообщения (с ее помощью будем парсить)
+// объединение содержащее все сообщения (с его помощью будем парсить)
 typedef union
 {
     uint8_t 			bytes[256];	// максимальная длина посылки (184) + начальная последовательность (4) + завершающая последовательность (4)
@@ -278,6 +275,9 @@ flyMode_t mode = FAILSAFE;		// режим полета
 uint8_t batteryPercent = 0;		// заряд аккумулятора (%)
 uint16_t batteryCell[3];	// напряжение каждой ячейки (мВ)
 #endif
-//};
+/*
+ * Ниже то, что нужно для питона
+ */
+// в питоне не создается новый класс, но создается новый объект у которого объявляются методы
 
 #endif /* NAZACANDECODER_H_ */

@@ -2,8 +2,9 @@
 import NazaCanDecoder   # после установки модуль подключается глобально
 import time
 
-NazaCanDecoder.Begin("can0")    # запуск модуля с привязкой к конкретной CAN шине
+naza = NazaCanDecoder.Decoder()    # запуск модуля с привязкой к конкретной CAN шине
+naza.Begin("can0")
 for i in range(1000):
-    print(NazaCanDecoder.GetBattery())
+    print(naza.GetBattery())
     time.sleep(0.001)
-NazaCanDecoder.Stop()   # завершение работы модуля
+naza.Stop()   # завершение работы модуля
