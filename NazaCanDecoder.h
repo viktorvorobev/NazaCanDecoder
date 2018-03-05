@@ -45,6 +45,7 @@ typedef enum {MOTOR_M1 = 0, MOTOR_M2 = 1, MOTOR_M3 = 2, MOTOR_M4 = 3,
 typedef enum {RC_UNUSED_1 = 0, RC_A = 1, RC_E = 2,
                 RC_R = 3, RC_U = 4, RC_T = 5, RC_UNUSED_2 = 6,
                 RC_X1 = 7, RC_X2 = 8, RC_UNUSED_3 = 9} rcInChan_t;			// индексы каналов управления
+// A - aileron E - elevator, R - rudder, T - throttle, U - , X1 - , X2 -
 
 int Begin(const char* canBus);		// запуск всех потоков (threads) класса
 int InitCanSocket(int *socket, const char* interface);	// создание CAN сокета

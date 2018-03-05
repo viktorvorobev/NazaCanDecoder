@@ -512,13 +512,13 @@ static PyObject * NazaCanDecoder_GetBattery(PyObject *self, PyObject *args) {  /
 }
 static PyObject * NazaCanDecoder_GetMotorOut(PyObject *self, PyObject *args) {// значение подаваемое на мотор, по номеру
     int motor;
-    if(!PyArg_ParseTuple(args, "s#", &motor)) return NULL;
+    if(!PyArg_ParseTuple(args, "h", &motor)) return NULL;
     uint16_t ret = GetMotorOutput(static_cast<motorOut_t>(motor));
     PyLong_FromSize_t(ret);
 }
 static PyObject * NazaCanDecoder_GetRcIn(PyObject *self, PyObject *args) {  // управляющее воздействие, по каналу
     int channel;
-    if(!PyArg_ParseTuple(args, "s#", &channel)) return NULL;
+    if(!PyArg_ParseTuple(args, "h", &channel)) return NULL;
     int16_t ret = GetRcIn(static_cast<rcInChan_t>(channel));
     PyLong_FromSsize_t(ret);
 }
@@ -533,7 +533,7 @@ static PyObject * NazaCanDecoder_GetBatteryPercent(PyObject *self, PyObject *arg
 }
 static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args){ // заряд банки
     int num;
-    if(!PyArg_ParseTuple(args, "s#", &num)) return NULL;
+    if(!PyArg_ParseTuple(args, "h", &num)) return NULL;
     uint16_t ret = GetBatteryCell(static_cast<smartBatteryCell_t>(num));
     PyLong_FromSize_t(ret);
 }
@@ -541,33 +541,33 @@ static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args){
 
 static PyMethodDef NazaCanDecoderMethods[] = {  // методы модуля
         {"Begin",       NazaCanDecoder_Begin, METH_VARARGS, "Starting Naza-Can Decoder threads"},
-        {"Stop",        NazaCanDecoder_Stop, METH_VARARGS, "Stoping Naza Can Decoder threads"},
-        {"GetLatitude",     NazaCanDecoder_GetLatitude, METH_VARARGS, "Returns latitude, degrees"},
-        {"GetLongitude",    NazaCanDecoder_GetLongitude, METH_VARARGS, "Returns longitude, degrees"},
-        {"GetAltitude",     NazaCanDecoder_GetAltitude, METH_VARARGS, "Returns altitude (barometric), m"},
-        {"GetAltitudeGps",  NazaCanDecoder_GetGpsAltitude, METH_VARARGS, "Returns altitude (GPS), m"},
-        {"GetSpeed",    NazaCanDecoder_GetSpeed, METH_VARARGS, "Returns speed (GPS), m/s"},
-        {"GetFixType",  NazaCanDecoder_GetFixType, METH_VARARGS, "Returns fix type (0 - no fix, 2 - 2D, 3 - 3D, 4 - DGPS)"},
-        {"GetNumSat",   NazaCanDecoder_GetNumSat, METH_VARARGS, "Returns number of found satellites"},
-        {"GetHeading",  NazaCanDecoder_GetHeading, METH_VARARGS, "Returns heading (compensated), degrees"},
-        {"GetHeadingNc",    NazaCanDecoder_GetHeadingNc, METH_VARARGS, "Returns heading (not compensated), degrees"},
-        {"GetCog",      NazaCanDecoder_GetCog, METH_VARARGS, "Returns course over ground, degrees"},
-        {"GetVsi",      NazaCanDecoder_GetVsi, METH_VARARGS, "Returns vertical speed (barometric), m/s"},
-        {"GetVsiGps",   NazaCanDecoder_GetVsiGps, METH_VARARGS, "Returns vertical speed (GPS), m/s"},
-        {"GetHdop",     NazaCanDecoder_GetHdop, METH_VARARGS, "Returns horizontal Dilution of Precision"},
-        {"GetVdop",     NazaCanDecoder_GetVdop, METH_VARARGS, "Returns vertical Dilution of Precision"},
-        {"GetPitch",    NazaCanDecoder_GetPitch, METH_VARARGS, "Returns pitch, degrees"},
-        {"GetRoll",     NazaCanDecoder_GetRoll, METH_VARARGS, "Returns roll, degrees"},
-        {"GetYear",     NazaCanDecoder_GetYear, METH_VARARGS, "Returns year (GPS), minus 2000"},
-        {"GetMonth",    NazaCanDecoder_GetMonth, METH_VARARGS, "Returns month (GPS)"},
-        {"GetDay",      NazaCanDecoder_GetDay, METH_VARARGS, "Returns day (GPS)"},
-        {"GetHour",     NazaCanDecoder_GetHour, METH_VARARGS, "Returns hour (GPS)"},
-        {"GetMinute",   NazaCanDecoder_GetMinute, METH_VARARGS, "Returns minute (GPS)"},
-        {"GetSecond",   NazaCanDecoder_GetSecond, METH_VARARGS, "Returns second (GPS)"},
-        {"GetBattery",  NazaCanDecoder_GetBattery, METH_VARARGS, "Returns battery voltage, mV"},
-        {"GetMotorOut", NazaCanDecoder_GetMotorOut, METH_VARARGS, "Returns motor output (0 - unused, otherwise 16920~35000, 16920 = motor off)"},
-        {"GetRcIn",     NazaCanDecoder_GetRcIn, METH_VARARGS, "Returns RC stick input (-1000~1000)"},
-        {"GetMode",     NazaCanDecoder_GetMode, METH_VARARGS, "Returns flight mode (0 - Manual, 1 - GPS, 2 - Failsafe, 3 - Atti)"},
+        {"Stop",        NazaCanDecoder_Stop, METH_NOARGS, "Stoping Naza Can Decoder threads"},
+        {"GetLatitude",     NazaCanDecoder_GetLatitude, METH_NOARGS, "Returns latitude, degrees"},
+        {"GetLongitude",    NazaCanDecoder_GetLongitude, METH_NOARGS, "Returns longitude, degrees"},
+        {"GetAltitude",     NazaCanDecoder_GetAltitude, METH_NOARGS, "Returns altitude (barometric), m"},
+        {"GetAltitudeGps",  NazaCanDecoder_GetGpsAltitude, METH_NOARGS, "Returns altitude (GPS), m"},
+        {"GetSpeed",    NazaCanDecoder_GetSpeed, METH_NOARGS, "Returns speed (GPS), m/s"},
+        {"GetFixType",  NazaCanDecoder_GetFixType, METH_NOARGS, "Returns fix type (0 - no fix, 2 - 2D, 3 - 3D, 4 - DGPS)"},
+        {"GetNumSat",   NazaCanDecoder_GetNumSat, METH_NOARGS, "Returns number of found satellites"},
+        {"GetHeading",  NazaCanDecoder_GetHeading, METH_NOARGS, "Returns heading (compensated), degrees"},
+        {"GetHeadingNc",    NazaCanDecoder_GetHeadingNc, METH_NOARGS, "Returns heading (not compensated), degrees"},
+        {"GetCog",      NazaCanDecoder_GetCog, METH_NOARGS, "Returns course over ground, degrees"},
+        {"GetVsi",      NazaCanDecoder_GetVsi, METH_NOARGS, "Returns vertical speed (barometric), m/s"},
+        {"GetVsiGps",   NazaCanDecoder_GetVsiGps, METH_NOARGS, "Returns vertical speed (GPS), m/s"},
+        {"GetHdop",     NazaCanDecoder_GetHdop, METH_NOARGS, "Returns horizontal Dilution of Precision"},
+        {"GetVdop",     NazaCanDecoder_GetVdop, METH_NOARGS, "Returns vertical Dilution of Precision"},
+        {"GetPitch",    NazaCanDecoder_GetPitch, METH_NOARGS, "Returns pitch, degrees"},
+        {"GetRoll",     NazaCanDecoder_GetRoll, METH_NOARGS, "Returns roll, degrees"},
+        {"GetYear",     NazaCanDecoder_GetYear, METH_NOARGS, "Returns year (GPS), minus 2000"},
+        {"GetMonth",    NazaCanDecoder_GetMonth, METH_NOARGS, "Returns month (GPS)"},
+        {"GetDay",      NazaCanDecoder_GetDay, METH_NOARGS, "Returns day (GPS)"},
+        {"GetHour",     NazaCanDecoder_GetHour, METH_NOARGS, "Returns hour (GPS)"},
+        {"GetMinute",   NazaCanDecoder_GetMinute, METH_NOARGS, "Returns minute (GPS)"},
+        {"GetSecond",   NazaCanDecoder_GetSecond, METH_NOARGS, "Returns second (GPS)"},
+        {"GetBattery",  NazaCanDecoder_GetBattery, METH_NOARGS, "Returns battery voltage, mV"},
+        {"GetMotorOut", NazaCanDecoder_GetMotorOut, METH_VARARGS, "Returns motor output (8 motors total, 0 - unused, otherwise 16920~35000, 16920 = motor off)"},
+        {"GetRcIn",     NazaCanDecoder_GetRcIn, METH_VARARGS, "Returns RC stick input (10 channels total, -1000~1000)"},
+        {"GetMode",     NazaCanDecoder_GetMode, METH_NOARGS, "Returns flight mode (0 - Manual, 1 - GPS, 2 - Failsafe, 3 - Atti)"},
 #ifdef GET_SMART_BATTERY_DATA
 {"GetBatteryPercent",   NazaCanDecoder_GetBatteryPercent, METH_VARARGS, "Returns battery charge percentage (0-100%)"},
         {"GetBatteryCell",      NazaCanDecoder_GetBatteryCell, METH_VARARGS, "Returns battery cell voltage in mV"},
@@ -616,43 +616,43 @@ static struct PyModuleDef NazaCanDecoderModule = {  // описание моду
 
 static PyTypeObject Decoder_Type = { // описание нового объекта Python
         PyVarObject_HEAD_INIT(NULL, 0)
-        "NazaCanDecoder.Decoder",            // tp_name
-        sizeof(NazaCanDecObject),    // basic size
-        0,                          // tp_itemsize
+        "NazaCanDecoder.Decoder",       // tp_name
+        sizeof(NazaCanDecObject),       // basic size
+        0,                              // tp_itemsize
         (destructor)NazaCanDecoder_dealloc, // tp_dealloc
-        0,                          // tp_print
-        0,                         // tp_getattr
-        0,                          // tp_setattr
-        0,                          // tp_reserved
-        0,                          // tp_repr
-        0,                          // tp_as_number
-        0,                          // tp_as_sequence
-        0,                          // tp_as_mapping
-        0,                          // tp_hash
-        0,                          // tp_call
-        0,                          // tp_str
-        0,                          // tp_getattro
-        0,                          // tp_setattro
-        0,                          // tp_as_buffer
-        Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,         // tp_flags
-        "Decoder object",      // tp_doc
-        0,                         // tp_traverse
-        0,                         // tp_clear
-        0,                         // tp_richcompare
-        0,                         // tp_weaklistoffset
-        0,                         // tp_iter
-        0,                         // tp_iternext
-        NazaCanDecoderMethods,         // tp_methods
-        NazaCanDec_members,             // tp_members
-        0,                         // tp_getset
-        0,                         // tp_base
-        0,                         // tp_dict
-        0,                         // tp_descr_get
-        0,                         // tp_descr_set
-        0,                         // tp_dictoffset
-        (initproc)NazaCanDecoder_init,    // tp_init
-        0,                         // tp_alloc
-        NazaCanDecoder_new,               // tp_new
+        0,                                  // tp_print
+        0,                              // tp_getattr
+        0,                              // tp_setattr
+        0,                              // tp_reserved
+        0,                              // tp_repr
+        0,                              // tp_as_number
+        0,                              // tp_as_sequence
+        0,                              // tp_as_mapping
+        0,                              // tp_hash
+        0,                              // tp_call
+        0,                              // tp_str
+        0,                              // tp_getattro
+        0,                              // tp_setattro
+        0,                              // tp_as_buffer
+        Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   // tp_flags
+        "Decoder object",               // tp_doc
+        0,                              // tp_traverse
+        0,                              // tp_clear
+        0,                              // tp_richcompare
+        0,                              // tp_weaklistoffset
+        0,                              // tp_iter
+        0,                              // tp_iternext
+        NazaCanDecoderMethods,          // tp_methods
+        0,                              // tp_members
+        0,                              // tp_getset
+        0,                              // tp_base
+        0,                              // tp_dict
+        0,                              // tp_descr_get
+        0,                              // tp_descr_set
+        0,                              // tp_dictoffset
+        (initproc)NazaCanDecoder_init,  // tp_init
+        0,                              // tp_alloc
+        NazaCanDecoder_new,             // tp_new
 };
 #define Decoder_Check(x) ((x) -> ob_type == &Decoder_Type)        // ф-ия проверки
 
