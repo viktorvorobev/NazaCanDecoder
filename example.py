@@ -6,7 +6,8 @@ naza = NazaCanDecoder.Decoder()    # запуск модуля с привязк
 naza.Begin("can0")
 motor = [0]*8
 rcIn = [0]*10
-for i in range(10000):
+
+for i in range(1000):
     # не требуют GPS
     altitude = naza.GetAltitude()
     vsi = naza.GetVsi()     #   vertical speed (barometric)
@@ -72,12 +73,11 @@ for i in range(10000):
               % (cog, vsiGps, hdop, vdop, hour, min, sec, day, month, year)
 
     # вывод сообщений
-    # print(msgNoGps)     # телеметрия которой не нужен GPS
-    print(msgMotors)    # значения, посылаемые на моторы
+    print(msgNoGps)     # телеметрия которой не нужен GPS
+    # print(msgMotors)    # значения, посылаемые на моторы
     # print(msgRcIn)      # значения, получаемые с пульта
     # print(msgGps1)      # телеметрия которой нужен GPS
     # print(msgGps2)
-
     time.sleep(0.01)
 naza.Stop()   # завершение работы модуля
 

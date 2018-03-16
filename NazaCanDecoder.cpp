@@ -302,8 +302,8 @@ uint8_t GetHour() {return hour;}	// возвращает часы от GPS (дл
 uint8_t GetMinute() {return minute;}	// возвращает минуты от GPS
 uint8_t GetSecond() {return second;}	// возвращает секунды от GPS
 uint16_t GetBattery() {return battery;}	// возвращает напряжение батарейки в мВ
-uint16_t GetMotorOutput(motorOut_t mot) {return motorOut[mot];}	// возвращает значение подаваемое на мотор (0 - не используется, иначе 16920~35000, 16920 = мотор выкл)
-int16_t GetRcIn(rcInChan_t chan) {return rcIn[chan];}		// возвращает значение получаемое от джойстика для каждого канала (-1000~1000)
+uint16_t GetMotorOutput(int mot) {return motorOut[mot];}	// возвращает значение подаваемое на мотор (0 - не используется, иначе 16920~35000, 16920 = мотор выкл)
+int16_t GetRcIn(int chan) {return rcIn[chan];}		// возвращает значение получаемое от джойстика для каждого канала (-1000~1000)
 flyMode_t GetMode() {return mode;}	// возвращает текущий режим работы
 #ifdef GET_SMART_BATTERY_DATA
 uint8_t GetBatteryPercent(){return batteryPercent;}	// возвращает заряд батареи в процентах
@@ -512,14 +512,16 @@ static PyObject * NazaCanDecoder_GetBattery(PyObject *self, PyObject *args) {  /
 }
 static PyObject * NazaCanDecoder_GetMotorOut(PyObject *self, PyObject *args) {// значение подаваемое на мотор, по номеру
     int motor;
-    if(!PyArg_ParseTuple(args, "h", &motor)) return NULL;
-    uint16_t ret = GetMotorOutput(static_cast<motorOut_t>(motor));
+    if(!PyArg_ParseTuple(args, "i", &motor)) return NULL;
+//    uint16_t ret = GetMotorOutput(static_cast<motorOut_t>(motor));
+    uint16_t ret = GetMotorOutput(motor);
     PyLong_FromSize_t(ret);
 }
 static PyObject * NazaCanDecoder_GetRcIn(PyObject *self, PyObject *args) {  // управляющее воздействие, по каналу
     int channel;
-    if(!PyArg_ParseTuple(args, "h", &channel)) return NULL;
-    int16_t ret = GetRcIn(static_cast<rcInChan_t>(channel));
+    if(!PyArg_ParseTuple(args, "i", &channel)) return NULL;
+//    int16_t ret = GetRcIn(static_cast<rcInChan_t>(channel));
+    int16_t ret = GetRcIn(channel);
     PyLong_FromSsize_t(ret);
 }
 static PyObject * NazaCanDecoder_GetMode(PyObject *self, PyObject *args) {  // режим полета
