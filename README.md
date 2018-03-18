@@ -6,4 +6,5 @@
 `sudo python3 setup.py build`  
 `sudo python3 setup.py install`
 
-Пример использования в файле example.py.
+Пример использования в файле example.py.  
+Описание библиотеки в файле Description.md.

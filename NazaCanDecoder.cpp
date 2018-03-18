@@ -293,7 +293,7 @@ double GetVsi() {return vsi;}		// возвращает скорость набо
 double GetVsiGps() {return gpsVsi;}	// возвращает скорость набора высоты в м/с (от GPS)
 double GetHdop() {return hdop;}	// возвращает горизонтальный DOP (dilution of precision)
 double GetVdop() {return vdop;}	// возрващает вертикальный DOP (dilution of precision)
-int8_t GetPitch() {return pitch;}	// возвращает угол рысканья в градусах
+int8_t GetPitch() {return pitch;}	// возвращает угол тангажа в градусах
 int16_t GetRoll() {return roll;}	// возвращает угол крена в градусах
 uint8_t GetYear() {return year;}	// возвращает год от GPS (последние 2 цифры)
 uint8_t GetMonth() {return month;}	// возвращает месяц от GPS
@@ -333,7 +333,7 @@ typedef struct {    // структура объекта, не должна бы
     double gpsVsi;		// скорость набора высоты по GPS (м/с)
     double hdop;		// горизонтальный DOP
     double vdop;		// вертикальный DOP
-    int8_t pitch;		// угол рысканья (градусы)
+    int8_t pitch;		// угол тангажа (градусы)
     int16_t roll;		// угол крена (радианы)
     uint8_t year;		// год (минус 2000)
     uint8_t month;		// месяц
@@ -474,7 +474,7 @@ static PyObject * NazaCanDecoder_GetVdop(PyObject *self, PyObject *args) {  // �
     double ret = GetVdop();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetPitch(PyObject *self, PyObject *args) {  // угол рысканья, град
+static PyObject * NazaCanDecoder_GetPitch(PyObject *self, PyObject *args) {  // угол тангажа, град
     int8_t ret = GetPitch();
     PyLong_FromSsize_t(ret);
 }

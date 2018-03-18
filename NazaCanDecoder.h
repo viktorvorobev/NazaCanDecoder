@@ -75,7 +75,7 @@ double GetVsi();		// возвращает скорость набора высо
 double GetVsiGps();	// возвращает скорость набора высоты в м/с (от GPS)
 double GetHdop();	// возвращает горизонтальный DOP (dilution of precision)
 double GetVdop();	// возрващает вертикальный DOP (dilution of precision)
-int8_t GetPitch();	// возвращает угол рысканья в градусах
+int8_t GetPitch();	// возвращает угол тангажа в градусах
 int16_t GetRoll();	// возвращает угол крена в градусах
 uint8_t GetYear();	// возвращает год от GPS (последние 2 цифры)
 uint8_t GetMonth();	// возвращает месяц от GPS
