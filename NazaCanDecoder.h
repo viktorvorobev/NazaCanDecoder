@@ -9,9 +9,11 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>		// низкоуровневая работа с интерфейсами
 #include <sys/un.h>
+#include <sys/uio.h>
 #include <netinet/in.h>
 #include <net/if.h>
 #include <ifaddrs.h>    // проверить существование сети
+#include <mutex>
 
 #include <iostream>
 #include <cstdio>
@@ -49,16 +51,15 @@ typedef enum {RC_UNUSED_1 = 0, RC_A = 1, RC_E = 2,
 
 int Begin(const char* canBus);		// запуск всех потоков (threads) класса
 int InitCanSocket(int *socket, const char* interface);	// создание CAN сокета
-void ThreadDebug();
 void ThreadHeartbeat();	// периодически (раз в 2 секунды) шлет heartbeat сообщение контроллеру
 void ThreadCanRead();
 std::queue<can_frame> inputMsg;    // очередь входящих сообщений
 uint8_t debugCounter;
-void ThreadParser();    // тред в котором будем парсить входящие сообщения
+void Parser(struct can_frame frame);    // тред в котором будем парсить входящие сообщения
 unsigned long GetDebugCounter();
 int Stop();        // функция, останавливающая треды
 uint16_t Decode();	// декодировать входящее CAN сообщение, если есть (должно вызываться в цикле)
-bool stop = true;	// флаг, по которому будем завершать треды
+static volatile int stop = true;	// флаг, по которому будем завершать треды
 
 // функции возвращающие значения
 double GetLatitude();	// возвращает широту в градусах
@@ -226,6 +227,8 @@ typedef union
 } naza_msg_t;
 
 int canSocket;
+std::mutex _lock;
+
 uint32_t heartBeatTime = 0;				// счетчик по которому будем посылать heartBeat
 struct can_frame HEARTBEAT_1;		// сообщения ThreadHeartbeat
 struct can_frame HEARTBEAT_2;

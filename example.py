@@ -8,6 +8,7 @@ motor = [0]*8
 rcIn = [0]*10
 
 for i in range(1000):
+# while True:
     # не требуют GPS
     altitude = naza.GetAltitude()
     vsi = naza.GetVsi()     #   vertical speed (barometric)
@@ -16,7 +17,6 @@ for i in range(1000):
     battery = naza.GetBattery()/1000
     mode = naza.GetMode()
     heading = naza.GetHeading()         # курс от кватерниона (видимо еще и от гироскопа)
-    headingNc = naza.GetHeadingNc()     # курс от магнетометра
     if mode == 0:
         modeStr = 'manual'
     elif mode == 1:
@@ -27,8 +27,8 @@ for i in range(1000):
         modeStr = 'atti'
     else:
         modeStr = 'unknown'
-    msgNoGps = 'mode: %s\tbat: %.2f\talt: %.2f\tvsi: %.2f\tpitch: %d\troll: %d\theading: %.2f\theadingNc: %.2f' \
-               % (modeStr, battery, altitude, vsi, pitch, roll, heading, headingNc)
+    msgNoGps = 'mode: %s\tbat: %.2f\talt: %.2f\tvsi: %.2f\tpitch: %d\troll: %d\theading: %.2f' \
+               % (modeStr, battery, altitude, vsi, pitch, roll, heading)
 
     for i in range(8):    # значения посылаемые на моторы
         motor[i] = naza.GetMotorOut(i)
@@ -52,6 +52,7 @@ for i in range(1000):
     vsiGps = naza.GetVsiGps()   # vertical speed (GPS)
     hdop = naza.GetHdop()   # horizontal Dilution of Precision
     vdop = naza.GetVdop()   # vertical Dilution of Precision
+    headingNc = naza.GetHeadingNc()     # курс от магнетометра
     year = naza.GetYear()
     month = naza.GetMonth()
     day = naza.GetDay()
@@ -69,8 +70,8 @@ for i in range(1000):
     else:
         fixTypeStr = 'Unknown'
     msgGps1 = 'fix: %s\tnumSat: %d\talt: %.2f\tlat: %.2f\tlon:%.2f\tspeed: %.2f' % (fixTypeStr, numSat, altitudeGps, latitude, longitude, speed)
-    msgGps2 = 'cog: %.2f\tvsi: %.2f\thdop: %.2f\tvdop: %.2f\ttime: %.2d:%.2d:%.2d\t date: %.2d.%.2d.%.2d' \
-              % (cog, vsiGps, hdop, vdop, hour, min, sec, day, month, year)
+    msgGps2 = 'headingNc: %.2f\tcog: %.2f\tvsi: %.2f\thdop: %.2f\tvdop: %.2f\ttime: %.2d:%.2d:%.2d\t date: %.2d.%.2d.%.2d' \
+              % (headingNc, cog, vsiGps, hdop, vdop, hour, min, sec, day, month, year)
 
     # вывод сообщений
     print(msgNoGps)     # телеметрия которой не нужен GPS

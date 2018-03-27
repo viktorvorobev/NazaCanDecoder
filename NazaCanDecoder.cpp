@@ -7,14 +7,16 @@
  * 2) Получение сообщений из CAN сети, их парсинг.
  */
 
-int InitCanSocket(int *sock, const char* interface) {   // инициализация CAN
+int InitCanSocket(int *sock, const char* interface) // инициализация CAN
+{
     int s, n;
     struct sockaddr_can addr{};
     struct ifreq ifr{};
     bool noSuchInterface = true;    // флаг, что интерфейс вообще есть
     struct ifaddrs *ifaddr, *ifa;
 
-    if(getifaddrs(&ifaddr) == -1) {    // получаем список всех интерфейсов
+    if(getifaddrs(&ifaddr) == -1)    // получаем список всех интерфейсов
+    {
         perror("ERROR: Failed to get ifaddrs.");
         return -1;
     }
@@ -23,12 +25,14 @@ int InitCanSocket(int *sock, const char* interface) {   // инициализа�
         if((!strcmp(interface, ifa->ifa_name)) && ifa->ifa_flags & IFF_UP)   // (strcmp: полное совпадение == 0)
             noSuchInterface = false;
 
-    if(noSuchInterface) {  // Ошибка что интерфейс не найден
+    if(noSuchInterface)  // Ошибка что интерфейс не найден
+    {
         perror("ERROR: Interface not found or down.");
         return -2;
     }
 
-    if((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0) {   // открываем порт
+    if((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0)   // открываем порт
+    {
         perror("ERROR: Failed to open port.");
         return -3;
     }
@@ -38,7 +42,8 @@ int InitCanSocket(int *sock, const char* interface) {   // инициализа�
     addr.can_family = AF_CAN;
     addr.can_ifindex = ifr.ifr_ifindex;
 
-    if(bind(s, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+    if(bind(s, (struct sockaddr *)&addr, sizeof(addr)) != 0)
+    {
         perror("ERROR: Failed to bind socket.");
         return -4;
     }
@@ -48,180 +53,217 @@ int InitCanSocket(int *sock, const char* interface) {   // инициализа�
     return 0;
 }
 
-void ThreadHeartbeat() {    // тред в котором отправляем HeartBeat метку в сеть
+void ThreadHeartbeat()    // тред в котором отправляем HeartBeat метку в сеть
+{
     printf("Heartbeat started\n");
-    while(!stop) {
+//    while(!stop)
+//    {
         struct can_frame frame{};
         frame = HEARTBEAT_1;
+        _lock.lock();   // перед отправкой делаем lock треда, чтобы отправка и чтение из одного порта не столкнулись
         write(canSocket, &frame, sizeof(struct can_frame));
+        _lock.unlock(); // после отправки - unlock
         frame = HEARTBEAT_2;
+        _lock.lock();
         write(canSocket, &frame, sizeof(struct can_frame));
+        _lock.unlock();
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
+//    }
     printf("Heartbeat stopped\n");
 }
 
-void ThreadCanRead() {  // тред в котором ловим посылки из CAN сети и помещаем их в FIFO буффер
+//void fprint_canframe(FILE *stream , struct can_frame *cf, char *eol, int sep, int maxdlen) {
+//    /* documentation see lib.h */
+//
+//    char buf[10]; /* max length */
+//    for (int i = 0; i < 8; i++)
+//    {
+//        buf[i] = cf->data[i];
+//    }
+////    sprint_canframe(buf, cf, sep, maxdlen);
+//    printf("%s", buf);
+//    printf("\n");
+//    if (eol)
+//        fprintf(stream, "%s", eol);
+//}
+
+
+void ThreadCanRead()    // тред в котором ловим посылки из CAN сети и помещаем их в FIFO буффер
+{
     printf("Can reading thread started\n");
+    struct can_frame frame{};
     while(!stop)
     {
-        struct can_frame frame{};
+//        fprint_canframe(stdout, &frame, NULL, 0, 0);
+        _lock.lock();   // блокируем поток, чтобы чтение и отправка не "столкнулись"
         read(canSocket, &frame, sizeof(struct can_frame));  // читаем
-        inputMsg.push(frame);   // помещаем в очередь
+        _lock.unlock();
+        Parser(frame);  // передаем для парсинга
     }
     printf("Can reading stopped\n");
 }
 
-void ThreadParser() {   // тред в котором собираем сообщение в буффер и парсим его
-    printf("Parser started \n");
-    while(!stop) {
-        uint16_t msgId = NAZA_MESSAGE_NONE;
-        if(inputMsg.empty()) continue; // если очередь пустая - пропускаем цикл
-        struct can_frame canMsg = inputMsg.front();  // забираем первый элемент
-        inputMsg.pop(); // удаляем его из очереди
+void Parser(struct can_frame frame) // функция, которая парсит сообщения
+{
+    uint16_t msgId = NAZA_MESSAGE_NONE;
+    struct can_frame canMsg = frame;
 
-        if(canMsg.can_id == 0x090) canMsgIdIdx = 0;  // смотрим от кого пришло сообщение
-        else if(canMsg.can_id == 0x108) canMsgIdIdx = 1;
-        else if(canMsg.can_id == 0x7F8) canMsgIdIdx = 2;
-        else continue;  // если сообщение прилетело от кого-то еще - пропускаем его
+    if(canMsg.can_id == 0x090) canMsgIdIdx = 0;  // смотрим от кого пришло сообщение
+    else if(canMsg.can_id == 0x108) canMsgIdIdx = 1;
+    else if(canMsg.can_id == 0x7F8) canMsgIdIdx = 2;
+    else return;  // если сообщение прилетело от кого-то еще - пропускаем его
 
-        for(uint8_t i = 0; i < canMsg.can_dlc; i++) {   // смотрим на каждый байт сообщения
-            canMsgByte = canMsg.data[i];
-            if(collectData[canMsgIdIdx] == 1) {
-                msgBuf[canMsgIdIdx].bytes[msgIdx[canMsgIdIdx]] = canMsgByte;  // записываем сообщение в буффер
-                if(msgIdx[canMsgIdIdx] == 3)    // если получили 4 байта - получаем длину сообщения
-                    msgLen[canMsgIdIdx] = msgBuf[canMsgIdIdx].header.len;
-                msgIdx[canMsgIdIdx] += 1;   // увеличиваем счетчик (на каком байте мы сейчас)
-                // если собрали все байты сообщения - прекращаем собирать
-                // (+8 тк: 2 - Id сообщения, 2 - Длина сообщения, 4 - завершающая последовательность)
-                if((msgIdx[canMsgIdIdx] > (msgLen[canMsgIdIdx] + 8)) || (msgIdx[canMsgIdIdx] > 256))
-                    collectData[canMsgIdIdx] = 0;
-            }
+    for(uint8_t i = 0; i < canMsg.can_dlc; i++) // смотрим на каждый байт сообщения
+    {
+        canMsgByte = canMsg.data[i];
+        if(collectData[canMsgIdIdx] == 1)
+        {
+            msgBuf[canMsgIdIdx].bytes[msgIdx[canMsgIdIdx]] = canMsgByte;  // записываем сообщение в буффер
+            if(msgIdx[canMsgIdIdx] == 3)    // если получили 4 байта - получаем длину сообщения
+                msgLen[canMsgIdIdx] = msgBuf[canMsgIdIdx].header.len;
+            msgIdx[canMsgIdIdx] += 1;   // увеличиваем счетчик (на каком байте мы сейчас)
+            // если собрали все байты сообщения - прекращаем собирать
+            // (+8 тк: 2 - Id сообщения, 2 - Длина сообщения, 4 - завершающая последовательность)
+            if((msgIdx[canMsgIdIdx] > (msgLen[canMsgIdIdx] + 8)) || (msgIdx[canMsgIdIdx] > 256))
+                collectData[canMsgIdIdx] = 0;
+        }
 
-            // ищем начальную последовательность (0x55 0xAA 0x55 0xAA)
-            if(canMsgByte == 0x55) {
-                if(header[canMsgIdIdx] == 0)    // пользуемся счетчиком, чтобы понять какой это байт последовательности
-                    header[canMsgIdIdx] = 1;
-                else if(header[canMsgIdIdx] == 2)
-                    header[canMsgIdIdx] = 3;
-                else header[canMsgIdIdx] = 0;   // если упустили последовательность - начинаем заново
+        // ищем начальную последовательность (0x55 0xAA 0x55 0xAA)
+        if(canMsgByte == 0x55)
+        {
+            if(header[canMsgIdIdx] == 0)    // пользуемся счетчиком, чтобы понять какой это байт последовательности
+                header[canMsgIdIdx] = 1;
+            else if(header[canMsgIdIdx] == 2)
+                header[canMsgIdIdx] = 3;
+            else header[canMsgIdIdx] = 0;   // если упустили последовательность - начинаем заново
+        }
+        else if(canMsgByte == 0xAA)
+        {
+            if(header[canMsgIdIdx] == 1)
+                header[canMsgIdIdx] = 2;
+            else if(header[canMsgIdIdx] == 3) // как только последовательность найдена
+            {
+                header[canMsgIdIdx] = 0;    // сбрасываем счетчик
+                collectData[canMsgIdIdx] = 1;   // поднимаем флаг, чтобы набирать буффер
+                msgIdx[canMsgIdIdx] = 0;    // обнуляем счетчик байт в сообщении
             }
-            else if(canMsgByte == 0xAA) {
-                if(header[canMsgIdIdx] == 1)
-                    header[canMsgIdIdx] = 2;
-                else if(header[canMsgIdIdx] == 3) { // как только последовательность найдена
-                    header[canMsgIdIdx] = 0;    // сбрасываем счетчик
-                    collectData[canMsgIdIdx] = 1;   // поднимаем флаг, чтобы набирать буффер
-                    msgIdx[canMsgIdIdx] = 0;    // обнуляем счетчик байт в сообщении
-                }
-                else header[canMsgIdIdx] = 0;   // если упустили последовательность - начинаем заново
-            }
-            else header[canMsgIdIdx] = 0;
+            else header[canMsgIdIdx] = 0;   // если упустили последовательность - начинаем заново
+        }
+        else header[canMsgIdIdx] = 0;
 
-            // ищем завершающую последовательность (0x66 0xCC 0x66 0xCC)
-            if(canMsgByte == 0x66) {    // аналогично начальной
-                if(footer[canMsgIdIdx] == 0)
-                    footer[canMsgIdIdx] = 1;
-                else if(footer[canMsgIdIdx] == 2)
-                    footer[canMsgIdIdx] = 3;
-                else footer[canMsgIdIdx] = 0;
-            }
-            else if(canMsgByte == 0xCC) {
-                if(footer[canMsgIdIdx] == 1)
-                    footer[canMsgIdIdx] = 2;
-                else if(footer[canMsgIdIdx] == 3) {
-                    footer[canMsgIdIdx] = 0;
-                    if(collectData[canMsgIdIdx] != 0)   // как только нашли - прекращаем собирать буффер сообщений
-                        collectData[canMsgIdIdx] = 2;   // парсим сообщение
-                }
-                else footer[canMsgIdIdx] = 0;
+        // ищем завершающую последовательность (0x66 0xCC 0x66 0xCC)
+        if(canMsgByte == 0x66)  // аналогично начальной
+        {
+            if(footer[canMsgIdIdx] == 0)
+                footer[canMsgIdIdx] = 1;
+            else if(footer[canMsgIdIdx] == 2)
+                footer[canMsgIdIdx] = 3;
+            else footer[canMsgIdIdx] = 0;
+        }
+        else if(canMsgByte == 0xCC)
+        {
+            if(footer[canMsgIdIdx] == 1)
+                footer[canMsgIdIdx] = 2;
+            else if(footer[canMsgIdIdx] == 3)
+            {
+                footer[canMsgIdIdx] = 0;
+                if(collectData[canMsgIdIdx] != 0)   // как только нашли - прекращаем собирать буффер сообщений
+                    collectData[canMsgIdIdx] = 2;   // парсим сообщение
             }
             else footer[canMsgIdIdx] = 0;
+        }
+        else footer[canMsgIdIdx] = 0;
 
-            // парсинг сообщений
-            if(collectData[canMsgIdIdx] == 2) {
-                if(msgIdx[canMsgIdIdx] == (msgLen[canMsgIdIdx] + 8)) {  // проверяем, что сообщение пришло целиком
-                    if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1002) { // парсим в зависимости от ID
-                        float magCalX = msgBuf[canMsgIdIdx].msg1002.magCalX;
-                        float magCalY = msgBuf[canMsgIdIdx].msg1002.magCalY;
-                        headingNc = -atan2(magCalY, magCalX)/M_PI * 180.0;
-                        if(headingNc < 0) headingNc += 360;
-                        float q0 = msgBuf[canMsgIdIdx].msg1002.quaternion[0];
-                        float q1 = msgBuf[canMsgIdIdx].msg1002.quaternion[1];
-                        float q2 = msgBuf[canMsgIdIdx].msg1002.quaternion[2];
-                        float q3 = msgBuf[canMsgIdIdx].msg1002.quaternion[3];
-                        heading = atan2(2.0*(q3*q0 + q1*q2), -1.0 + 2.0*(q0*q0 + q1*q1)) / M_PI*180.0;
-                        if(heading < 0) heading += 360.0;
-                        satellite = msgBuf[canMsgIdIdx].msg1002.numSat;
-                        gpsAltitude = msgBuf[canMsgIdIdx].msg1002.altGps;
-                        latitude = msgBuf[canMsgIdIdx].msg1002.latitude / M_PI*180.0;
-                        longitude = msgBuf[canMsgIdIdx].msg1002.longitude / M_PI*180.0;
-                        altitude = msgBuf[canMsgIdIdx].msg1002.altBaro;
-                        float nVel = msgBuf[canMsgIdIdx].msg1002.northVelocity;
-                        float eVel = msgBuf[canMsgIdIdx].msg1002.eastVelocity;
-                        speed = sqrt(nVel*nVel + eVel*eVel);
-                        cog = atan2(eVel, nVel) / M_PI*180.0;
-                        if(cog < 0) cog += 360;
-                        vsi = -msgBuf[canMsgIdIdx].msg1002.downVelocity;
-                        msgId = NAZA_MESSAGE_MSG1002;
-                    }
-                    else if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1003) {
-                        uint32_t dateTime = msgBuf[canMsgIdIdx].msg1003.dateTime;
-                        second = dateTime & 0b00111111; dateTime >>= 6;
-                        minute = dateTime & 0b00111111; dateTime >>= 6;
-                        hour = dateTime & 0b00001111; dateTime >>= 4;
-                        day = dateTime & 0b00011111; dateTime >>= 5;
-                        if(hour > 7) day++; //TODO: разобраться с часовыми поясами
-                        month = dateTime & 0b00001111; dateTime >>= 4;
-                        year = dateTime & 0b01111111;
-                        gpsVsi = -msgBuf[canMsgIdIdx].msg1003.downVelocity;
-                        vdop = (double)msgBuf[canMsgIdIdx].msg1003.vdop / 100;
-                        double ndop = (double)msgBuf[canMsgIdIdx].msg1003.ndop / 100;
-                        double edop = (double)msgBuf[canMsgIdIdx].msg1003.edop / 100;
-                        hdop = sqrt(ndop*ndop + edop*edop);
-                        uint8_t fixType = msgBuf[canMsgIdIdx].msg1003.fixType;
-                        uint8_t fixFlags = msgBuf[canMsgIdIdx].msg1003.fixStatus;
-                        switch(fixType) {
-                            case 2 : fix = FIX_2D; break;
-                            case 3 : fix = FIX_3D; break;
-                            default: fix = NO_FIX; break;
-                        }
-                        if((fix != NO_FIX) && (fixFlags & 0x02)) fix = FIX_DGPS;
-                        msgId = NAZA_MESSAGE_MSG1003;
-                    }
-                    else if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1009) {
-                        for(uint8_t j = 0; j < 8; j++)
-                            motorOut[j] = msgBuf[canMsgIdIdx].msg1009.motorOut[j];
-                        for(uint8_t j = 0; j < 10; j++)
-                            rcIn[j] = msgBuf[canMsgIdIdx].msg1009.rcIn[j];
-#ifndef GET_SMART_BATTERY_DATA
-                        battery = msgBuf[canMsgIdIdx].msg1009.batVolt;
-#endif
-                        rollRad = msgBuf[canMsgIdIdx].msg1009.roll;
-                        pitchRad = msgBuf[canMsgIdIdx].msg1009.pitch;
-                        roll = (int16_t)(rollRad*180.0 / M_PI);
-                        pitch = (int16_t)(pitchRad*180.0 / M_PI);
-                        mode = (flyMode_t)msgBuf[canMsgIdIdx].msg1009.flightMode;
-                        msgId = NAZA_MESSAGE_MSG1009;
-                    }
-#ifdef GET_SMART_BATTERY_DATA
-                    else if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG0926){
-                        battery = msgBuf[canMsgIdIdx].msg0926.voltage;
-                        batteryPercent = msgBuf[canMsgIdIdx].msg0926.chargePercent;
-                        for(uint8_t j = 0; j < 3; j++)
-                            batteryCell[j] = msgBuf[canMsgIdIdx].msg0926.cellVoltage[j];
-                        msgId = NAZA_MESSAGE_MSG0926;
-                    }
-#endif
+        // парсинг сообщений
+        if(collectData[canMsgIdIdx] == 2)
+        {
+            if(msgIdx[canMsgIdIdx] == (msgLen[canMsgIdIdx] + 8))    // проверяем, что сообщение пришло целиком
+            {
+                if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1002)    // парсим в зависимости от ID
+                {
+                    float magCalX = msgBuf[canMsgIdIdx].msg1002.magCalX;
+                    float magCalY = msgBuf[canMsgIdIdx].msg1002.magCalY;
+                    headingNc = -atan2(magCalY, magCalX)/M_PI * 180.0;
+                    if(headingNc < 0) headingNc += 360;
+                    float q0 = msgBuf[canMsgIdIdx].msg1002.quaternion[0];
+                    float q1 = msgBuf[canMsgIdIdx].msg1002.quaternion[1];
+                    float q2 = msgBuf[canMsgIdIdx].msg1002.quaternion[2];
+                    float q3 = msgBuf[canMsgIdIdx].msg1002.quaternion[3];
+                    heading = atan2(2.0*(q3*q0 + q1*q2), -1.0 + 2.0*(q0*q0 + q1*q1)) / M_PI*180.0;
+                    if(heading < 0) heading += 360.0;
+                    satellite = msgBuf[canMsgIdIdx].msg1002.numSat;
+                    gpsAltitude = msgBuf[canMsgIdIdx].msg1002.altGps;
+                    latitude = msgBuf[canMsgIdIdx].msg1002.latitude / M_PI*180.0;
+                    longitude = msgBuf[canMsgIdIdx].msg1002.longitude / M_PI*180.0;
+                    altitude = msgBuf[canMsgIdIdx].msg1002.altBaro;
+                    float nVel = msgBuf[canMsgIdIdx].msg1002.northVelocity;
+                    float eVel = msgBuf[canMsgIdIdx].msg1002.eastVelocity;
+                    speed = sqrt(nVel*nVel + eVel*eVel);
+                    cog = atan2(eVel, nVel) / M_PI*180.0;
+                    if(cog < 0) cog += 360;
+                    vsi = -msgBuf[canMsgIdIdx].msg1002.downVelocity;
+                    msgId = NAZA_MESSAGE_MSG1002;
                 }
-                collectData[canMsgIdIdx] = 0;
+                else if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1003)
+                {
+                    uint32_t dateTime = msgBuf[canMsgIdIdx].msg1003.dateTime;
+                    second = dateTime & 0b00111111; dateTime >>= 6;
+                    minute = dateTime & 0b00111111; dateTime >>= 6;
+                    hour = dateTime & 0b00001111; dateTime >>= 4;
+                    day = dateTime & 0b00011111; dateTime >>= 5;
+                    if(hour > 7) day++; //TODO: разобраться с часовыми поясами
+                    month = dateTime & 0b00001111; dateTime >>= 4;
+                    year = dateTime & 0b01111111;
+                    gpsVsi = -msgBuf[canMsgIdIdx].msg1003.downVelocity;
+                    vdop = (double)msgBuf[canMsgIdIdx].msg1003.vdop / 100;
+                    double ndop = (double)msgBuf[canMsgIdIdx].msg1003.ndop / 100;
+                    double edop = (double)msgBuf[canMsgIdIdx].msg1003.edop / 100;
+                    hdop = sqrt(ndop*ndop + edop*edop);
+                    uint8_t fixType = msgBuf[canMsgIdIdx].msg1003.fixType;
+                    uint8_t fixFlags = msgBuf[canMsgIdIdx].msg1003.fixStatus;
+                    switch(fixType)
+                    {
+                        case 2 : fix = FIX_2D; break;
+                        case 3 : fix = FIX_3D; break;
+                        default: fix = NO_FIX; break;
+                    }
+                    if((fix != NO_FIX) && (fixFlags & 0x02)) fix = FIX_DGPS;
+                    msgId = NAZA_MESSAGE_MSG1003;
+                }
+                else if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1009)
+                {
+                    for(uint8_t j = 0; j < 8; j++)
+                        motorOut[j] = msgBuf[canMsgIdIdx].msg1009.motorOut[j];
+                    for(uint8_t j = 0; j < 10; j++)
+                        rcIn[j] = msgBuf[canMsgIdIdx].msg1009.rcIn[j];
+#ifndef GET_SMART_BATTERY_DATA
+                    battery = msgBuf[canMsgIdIdx].msg1009.batVolt;
+#endif
+                    rollRad = msgBuf[canMsgIdIdx].msg1009.roll;
+                    pitchRad = msgBuf[canMsgIdIdx].msg1009.pitch;
+                    roll = (int16_t)(rollRad*180.0 / M_PI);
+                    pitch = (int16_t)(pitchRad*180.0 / M_PI);
+                    mode = (flyMode_t)msgBuf[canMsgIdIdx].msg1009.flightMode;
+                    msgId = NAZA_MESSAGE_MSG1009;
+                }
+#ifdef GET_SMART_BATTERY_DATA
+                else if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG0926)
+                {
+                    battery = msgBuf[canMsgIdIdx].msg0926.voltage;
+                    batteryPercent = msgBuf[canMsgIdIdx].msg0926.chargePercent;
+                    for(uint8_t j = 0; j < 3; j++)
+                        batteryCell[j] = msgBuf[canMsgIdIdx].msg0926.cellVoltage[j];
+                    msgId = NAZA_MESSAGE_MSG0926;
+                }
+#endif
             }
+            collectData[canMsgIdIdx] = 0;
         }
     }
-    printf("Parser stopped\n");
 }
 
-int Begin(const char* canBus) {
+int Begin(const char* canBus)
+{
     // создаем HeartBeat сообщения
     HEARTBEAT_1.can_id = 0x108;
     HEARTBEAT_1.data[0] = 0x55;
@@ -253,12 +295,13 @@ int Begin(const char* canBus) {
     }
     stop = false;
     printf("Starting threads...\n");
-    std::thread thr1(ThreadHeartbeat);
+    ThreadHeartbeat();
+//    std::thread thr1(ThreadHeartbeat);
     std::thread thr2(ThreadCanRead);
-    std::thread thr3(ThreadParser);
-    thr1.detach();
+//    std::thread thr3(ThreadParser);
+//    thr1.detach();
     thr2.detach();
-    thr3.detach();
+//    thr3.detach();
     return 0;
 }
 
