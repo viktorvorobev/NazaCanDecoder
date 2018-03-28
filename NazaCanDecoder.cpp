@@ -53,40 +53,17 @@ int InitCanSocket(int *sock, const char* interface) // инициализаци�
     return 0;
 }
 
-void ThreadHeartbeat()    // тред в котором отправляем HeartBeat метку в сеть
+void SendHeartbeat()    // тред в котором отправляем HeartBeat метку в сеть
 {
-    printf("Heartbeat started\n");
-//    while(!stop)
-//    {
-        struct can_frame frame{};
-        frame = HEARTBEAT_1;
-        _lock.lock();   // перед отправкой делаем lock треда, чтобы отправка и чтение из одного порта не столкнулись
-        write(canSocket, &frame, sizeof(struct can_frame));
-        _lock.unlock(); // после отправки - unlock
-        frame = HEARTBEAT_2;
-        _lock.lock();
-        write(canSocket, &frame, sizeof(struct can_frame));
-        _lock.unlock();
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-//    }
-    printf("Heartbeat stopped\n");
+    printf("Sending heartbeat frame...\n");
+    struct can_frame frame{};
+    frame = HEARTBEAT_1;
+    write(canSocket, &frame, sizeof(struct can_frame));
+    frame = HEARTBEAT_2;
+    write(canSocket, &frame, sizeof(struct can_frame));
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));    // ждем пока Naza отреагирует на метку
+    printf("Heartbeat frame sent\n");
 }
-
-//void fprint_canframe(FILE *stream , struct can_frame *cf, char *eol, int sep, int maxdlen) {
-//    /* documentation see lib.h */
-//
-//    char buf[10]; /* max length */
-//    for (int i = 0; i < 8; i++)
-//    {
-//        buf[i] = cf->data[i];
-//    }
-////    sprint_canframe(buf, cf, sep, maxdlen);
-//    printf("%s", buf);
-//    printf("\n");
-//    if (eol)
-//        fprintf(stream, "%s", eol);
-//}
-
 
 void ThreadCanRead()    // тред в котором ловим посылки из CAN сети и помещаем их в FIFO буффер
 {
@@ -94,10 +71,7 @@ void ThreadCanRead()    // тред в котором ловим посылки 
     struct can_frame frame{};
     while(!stop)
     {
-//        fprint_canframe(stdout, &frame, NULL, 0, 0);
-        _lock.lock();   // блокируем поток, чтобы чтение и отправка не "столкнулись"
         read(canSocket, &frame, sizeof(struct can_frame));  // читаем
-        _lock.unlock();
         Parser(frame);  // передаем для парсинга
     }
     printf("Can reading stopped\n");
@@ -289,39 +263,27 @@ int Begin(const char* canBus)
 //    FILTER_108.can_id = 0x108;
 //    FILTER_7F8.can_id = 0x7F8;
     printf("Initialising CAN socket: \"%s\"...\n", canBus);
-    if(InitCanSocket(&canSocket, canBus) != 0) {    // инициализируем CAN
+    if(InitCanSocket(&canSocket, canBus) != 0)  // инициализируем CAN
+    {
         perror("ERROR: Failed to initialize can bus");
         return -1;
     }
     stop = false;
     printf("Starting threads...\n");
-    ThreadHeartbeat();
-//    std::thread thr1(ThreadHeartbeat);
-    std::thread thr2(ThreadCanRead);
-//    std::thread thr3(ThreadParser);
-//    thr1.detach();
-    thr2.detach();
-//    thr3.detach();
+    SendHeartbeat();
+    std::thread thr(ThreadCanRead);
+    thr.detach();
     return 0;
 }
 
-int Stop() {    // функция останавливающая все треды
+int Stop()  // функция останавливающая все треды
+{
     printf("Stopping threads...\n");
     stop = true;
     return 0;
 }
 
-void ThreadDebug() {
-    printf("Debug counter started\n");
-    while(!stop) {
-        debugCounter += 1;
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    }
-    printf("Debug counter stopped\n");
-}
-
 // функции, возвращающие значения
-unsigned long GetDebugCounter() {return inputMsg.size();}
 double GetLatitude() {return latitude;}	// возвращает широту в градусах
 double GetLongitude() {return longitude;}	// возвращает долготу в градусах
 double GetAltitude() {return altitude;}	// возвращает высоту в метрах (от барометра)
@@ -350,7 +312,7 @@ int16_t GetRcIn(int chan) {return rcIn[chan];}		// возвращает знач
 flyMode_t GetMode() {return mode;}	// возвращает текущий режим работы
 #ifdef GET_SMART_BATTERY_DATA
 uint8_t GetBatteryPercent(){return batteryPercent;}	// возвращает заряд батареи в процентах
-uint16_t GetBatteryCell(smartBatteryCell_t cell) {return batteryCell[cell];}	// возвращает напряжение банки в мВ
+uint16_t GetBatteryCell(int cell) {return batteryCell[cell];}	// возвращает напряжение банки в мВ
 #endif
 
 /*
@@ -358,9 +320,9 @@ uint16_t GetBatteryCell(smartBatteryCell_t cell) {return batteryCell[cell];}	// 
  */
 
 static PyObject *NCDError;  //Naza Can Decoder Error
-//PyTypeObject Decoder_Type;    // тип данных нового класса ?
 
-typedef struct {    // структура объекта, не должна быть пустой, скорее всего потом я что-нибудь отсюда уберу
+typedef struct  // структура объекта, не должна быть пустой, скорее всего потом я что-нибудь отсюда уберу
+{
     PyObject_HEAD
     double longitude;	// долгота (град)
     double latitude;	// широта (град)
@@ -391,15 +353,18 @@ typedef struct {    // структура объекта, не должна бы
 #endif
 } NazaCanDecObject;
 
-static void NazaCanDecoder_dealloc(NazaCanDecObject* self){     // деструктор, очищает память при удалении объекта
+static void NazaCanDecoder_dealloc(NazaCanDecObject* self)  // деструктор, очищает память при удалении объекта
+{
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static int NazaCanDecoder_init(NazaCanDecObject* self, PyObject *args){ // инициализация класса
+static int NazaCanDecoder_init(NazaCanDecObject* self, PyObject *args)  // инициализация класса
+{
     return 0;
 }
 
-static PyObject* NazaCanDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds){    // конструктор класса
+static PyObject* NazaCanDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds) // конструктор класса
+{
     NazaCanDecObject* self; // объявляем что self'ом теперь будет объявленная ранее структура
     self = (NazaCanDecObject *)type->tp_alloc(type, 0);
     if(self != NULL)    // обнуление переменных
@@ -437,12 +402,14 @@ static PyObject* NazaCanDecoder_new(PyTypeObject *type, PyObject *args, PyObject
 
 
 // метод Begin, запускает треды, прослушивание CAN, парсинг сообщений, онлайн метки, аргумент - имя шины CAN
-static PyObject * NazaCanDecoder_Begin(PyObject *self, PyObject *args) {    // п
+static PyObject * NazaCanDecoder_Begin(PyObject *self, PyObject *args)
+{
     const char *canBus;
     int ret;    // результат выполнения функции Begin
     if(!PyArg_ParseTuple(args, "s", &canBus)) return NULL;  // пробуем парсить строку
     ret = Begin(canBus);
-    if(ret != 0) {  // смотрим на результат выполнения команды
+    if(ret != 0)    // смотрим на результат выполнения команды
+    {
         PyErr_SetString(NCDError, "Begin failed");
         return NULL;
     }
@@ -450,260 +417,287 @@ static PyObject * NazaCanDecoder_Begin(PyObject *self, PyObject *args) {    // �
 }
 
 // метод Stop - останавливает все треды
-static PyObject * NazaCanDecoder_Stop(PyObject *self, PyObject *args) {
+static PyObject * NazaCanDecoder_Stop(PyObject *self, PyObject *args)
+{
     int ret = Stop();
     PyLong_FromLong(ret);
 }
 
 // методы возвращающие посчитанные значения
-static PyObject * NazaCanDecoder_GetDebugCounter(PyObject *self, PyObject *args) {
-    unsigned long ret;
-    ret = GetDebugCounter();
-    PyLong_FromUnsignedLong(ret);
-}
-static PyObject * NazaCanDecoder_GetLatitude(PyObject *self, PyObject *args) {  // широта
+static PyObject * NazaCanDecoder_GetLatitude(PyObject *self, PyObject *args)    // широта
+{
     double ret = GetLatitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetLongitude(PyObject *self, PyObject *args) {  // долгода
+static PyObject * NazaCanDecoder_GetLongitude(PyObject *self, PyObject *args)   // долгода
+{
     double ret = GetLongitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetAltitude(PyObject *self, PyObject *args) {  // высота по барометру
+static PyObject * NazaCanDecoder_GetAltitude(PyObject *self, PyObject *args)    // высота по барометру
+{
     double ret = GetAltitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetGpsAltitude(PyObject *self, PyObject *args) {  // высота по GPS
+static PyObject * NazaCanDecoder_GetGpsAltitude(PyObject *self, PyObject *args) // высота по GPS
+{
     double ret = GetGpsAltitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetSpeed(PyObject *self, PyObject *args) {  // скорость
+static PyObject * NazaCanDecoder_GetSpeed(PyObject *self, PyObject *args)   // скорость
+{
     double ret = GetSpeed();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetFixType(PyObject *self, PyObject *args) {  // тип фиксации
+static PyObject * NazaCanDecoder_GetFixType(PyObject *self, PyObject *args) // тип фиксации
+{
     uint8_t ret = GetFixType();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetNumSat(PyObject *self, PyObject *args) {  // кол-во спутников
+static PyObject * NazaCanDecoder_GetNumSat(PyObject *self, PyObject *args)  // кол-во спутников
+{
     uint8_t ret = GetNumSat();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetHeading(PyObject *self, PyObject *args) {  // курс
+static PyObject * NazaCanDecoder_GetHeading(PyObject *self, PyObject *args) // курс
+{
+
     double ret = GetHeading();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetHeadingNc(PyObject *self, PyObject *args) {  // курс без компенсации наклона
+static PyObject * NazaCanDecoder_GetHeadingNc(PyObject *self, PyObject *args)   // курс без компенсации наклона
+{
     double ret = GetHeadingNc();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetCog(PyObject *self, PyObject *args) {  // курс над землей
+static PyObject * NazaCanDecoder_GetCog(PyObject *self, PyObject *args) // курс над землей
+{
     double ret = GetCog();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetVsi(PyObject *self, PyObject *args) {  // скорость набора высоты (барометр)
+static PyObject * NazaCanDecoder_GetVsi(PyObject *self, PyObject *args) // скорость набора высоты (барометр)
+{
     double ret = GetVsi();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetVsiGps(PyObject *self, PyObject *args) {  // скорость набора высоты (GPS)
+static PyObject * NazaCanDecoder_GetVsiGps(PyObject *self, PyObject *args)  // скорость набора высоты (GPS)
+{
     double ret = GetVsiGps();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetHdop(PyObject *self, PyObject *args) {  // горизонтальный DOP
+static PyObject * NazaCanDecoder_GetHdop(PyObject *self, PyObject *args)    // горизонтальный DOP
+{
     double ret = GetHdop();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetVdop(PyObject *self, PyObject *args) {  // вертикальный DOP
+static PyObject * NazaCanDecoder_GetVdop(PyObject *self, PyObject *args)    // вертикальный DOP
+{
     double ret = GetVdop();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetPitch(PyObject *self, PyObject *args) {  // угол тангажа, град
+static PyObject * NazaCanDecoder_GetPitch(PyObject *self, PyObject *args)   // угол тангажа, град
+{
     int8_t ret = GetPitch();
     PyLong_FromSsize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetRoll(PyObject *self, PyObject *args) {  // угол крена, град
+static PyObject * NazaCanDecoder_GetRoll(PyObject *self, PyObject *args)    // угол крена, град
+{
     int16_t ret = GetRoll();
     PyLong_FromSsize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetYear(PyObject *self, PyObject *args) {  // год
+static PyObject * NazaCanDecoder_GetYear(PyObject *self, PyObject *args)    // год
+{
     uint8_t ret = GetYear();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMonth(PyObject *self, PyObject *args) {  // месяц
+static PyObject * NazaCanDecoder_GetMonth(PyObject *self, PyObject *args)   // месяц
+{
     uint8_t ret = GetMonth();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetDay(PyObject *self, PyObject *args) {  // день
+static PyObject * NazaCanDecoder_GetDay(PyObject *self, PyObject *args) // день
+{
     uint8_t ret = GetDay();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetHour(PyObject *self, PyObject *args) {  // час
+static PyObject * NazaCanDecoder_GetHour(PyObject *self, PyObject *args)    // час
+{
     uint8_t ret = GetHour();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMinute(PyObject *self, PyObject *args) {  // минута
+static PyObject * NazaCanDecoder_GetMinute(PyObject *self, PyObject *args)  // минута
+{
     uint8_t ret = GetMinute();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetSecond(PyObject *self, PyObject *args) {  // секунда
+static PyObject * NazaCanDecoder_GetSecond(PyObject *self, PyObject *args)  // секунда
+{
     uint8_t ret = GetSecond();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetBattery(PyObject *self, PyObject *args) {  // заряд аккумулятора
+static PyObject * NazaCanDecoder_GetBattery(PyObject *self, PyObject *args) // заряд аккумулятора
+{
     uint16_t ret = GetBattery();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMotorOut(PyObject *self, PyObject *args) {// значение подаваемое на мотор, по номеру
+static PyObject * NazaCanDecoder_GetMotorOut(PyObject *self, PyObject *args)    // значение подаваемое на мотор, по номеру
+{
     int motor;
     if(!PyArg_ParseTuple(args, "i", &motor)) return NULL;
-//    uint16_t ret = GetMotorOutput(static_cast<motorOut_t>(motor));
     uint16_t ret = GetMotorOutput(motor);
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetRcIn(PyObject *self, PyObject *args) {  // управляющее воздействие, по каналу
+static PyObject * NazaCanDecoder_GetRcIn(PyObject *self, PyObject *args)    // управляющее воздействие, по каналу
+{
     int channel;
     if(!PyArg_ParseTuple(args, "i", &channel)) return NULL;
-//    int16_t ret = GetRcIn(static_cast<rcInChan_t>(channel));
     int16_t ret = GetRcIn(channel);
     PyLong_FromSsize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMode(PyObject *self, PyObject *args) {  // режим полета
+static PyObject * NazaCanDecoder_GetMode(PyObject *self, PyObject *args)    // режим полета
+{
     uint8_t ret = GetMode();
     PyLong_FromSize_t(ret);
 }
 #ifdef GET_SMART_BATTERY_DATA
-static PyObject * NazaCanDecoder_GetBatteryPercent(PyObject *self, PyObject *args){ // заряд батареи
+static PyObject * NazaCanDecoder_GetBatteryPercent(PyObject *self, PyObject *args)  // заряд батареи
+{
     uint8_t ret = GetBatteryPercent();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args){ // заряд банки
+static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args) // заряд банки
+{
     int num;
-    if(!PyArg_ParseTuple(args, "h", &num)) return NULL;
-    uint16_t ret = GetBatteryCell(static_cast<smartBatteryCell_t>(num));
+    if(!PyArg_ParseTuple(args, "i", &num)) return NULL;
+    uint16_t ret = GetBatteryCell(num);
     PyLong_FromSize_t(ret);
 }
 #endif
 
-static PyMethodDef NazaCanDecoderMethods[] = {  // методы модуля
-        {"Begin",       NazaCanDecoder_Begin, METH_VARARGS, "Starting Naza-Can Decoder threads"},
-        {"Stop",        NazaCanDecoder_Stop, METH_NOARGS, "Stoping Naza Can Decoder threads"},
-        {"GetLatitude",     NazaCanDecoder_GetLatitude, METH_NOARGS, "Returns latitude, degrees"},
-        {"GetLongitude",    NazaCanDecoder_GetLongitude, METH_NOARGS, "Returns longitude, degrees"},
-        {"GetAltitude",     NazaCanDecoder_GetAltitude, METH_NOARGS, "Returns altitude (barometric), m"},
-        {"GetAltitudeGps",  NazaCanDecoder_GetGpsAltitude, METH_NOARGS, "Returns altitude (GPS), m"},
-        {"GetSpeed",    NazaCanDecoder_GetSpeed, METH_NOARGS, "Returns speed (GPS), m/s"},
-        {"GetFixType",  NazaCanDecoder_GetFixType, METH_NOARGS, "Returns fix type (0 - no fix, 2 - 2D, 3 - 3D, 4 - DGPS)"},
-        {"GetNumSat",   NazaCanDecoder_GetNumSat, METH_NOARGS, "Returns number of found satellites"},
-        {"GetHeading",  NazaCanDecoder_GetHeading, METH_NOARGS, "Returns heading (compensated), degrees"},
-        {"GetHeadingNc",    NazaCanDecoder_GetHeadingNc, METH_NOARGS, "Returns heading (not compensated), degrees"},
-        {"GetCog",      NazaCanDecoder_GetCog, METH_NOARGS, "Returns course over ground, degrees"},
-        {"GetVsi",      NazaCanDecoder_GetVsi, METH_NOARGS, "Returns vertical speed (barometric), m/s"},
-        {"GetVsiGps",   NazaCanDecoder_GetVsiGps, METH_NOARGS, "Returns vertical speed (GPS), m/s"},
-        {"GetHdop",     NazaCanDecoder_GetHdop, METH_NOARGS, "Returns horizontal Dilution of Precision"},
-        {"GetVdop",     NazaCanDecoder_GetVdop, METH_NOARGS, "Returns vertical Dilution of Precision"},
-        {"GetPitch",    NazaCanDecoder_GetPitch, METH_NOARGS, "Returns pitch, degrees"},
-        {"GetRoll",     NazaCanDecoder_GetRoll, METH_NOARGS, "Returns roll, degrees"},
-        {"GetYear",     NazaCanDecoder_GetYear, METH_NOARGS, "Returns year (GPS), minus 2000"},
-        {"GetMonth",    NazaCanDecoder_GetMonth, METH_NOARGS, "Returns month (GPS)"},
-        {"GetDay",      NazaCanDecoder_GetDay, METH_NOARGS, "Returns day (GPS)"},
-        {"GetHour",     NazaCanDecoder_GetHour, METH_NOARGS, "Returns hour (GPS)"},
-        {"GetMinute",   NazaCanDecoder_GetMinute, METH_NOARGS, "Returns minute (GPS)"},
-        {"GetSecond",   NazaCanDecoder_GetSecond, METH_NOARGS, "Returns second (GPS)"},
-        {"GetBattery",  NazaCanDecoder_GetBattery, METH_NOARGS, "Returns battery voltage, mV"},
-        {"GetMotorOut", NazaCanDecoder_GetMotorOut, METH_VARARGS, "Returns motor output (8 motors total, 0 - unused, otherwise 16920~35000, 16920 = motor off)"},
-        {"GetRcIn",     NazaCanDecoder_GetRcIn, METH_VARARGS, "Returns RC stick input (10 channels total, -1000~1000)"},
-        {"GetMode",     NazaCanDecoder_GetMode, METH_NOARGS, "Returns flight mode (0 - Manual, 1 - GPS, 2 - Failsafe, 3 - Atti)"},
+static PyMethodDef NazaCanDecoderMethods[] =    // методы модуля
+{
+    {"Begin",       NazaCanDecoder_Begin, METH_VARARGS, "Starting Naza-Can Decoder threads"},
+    {"Stop",        NazaCanDecoder_Stop, METH_NOARGS, "Stoping Naza Can Decoder threads"},
+    {"GetLatitude",     NazaCanDecoder_GetLatitude, METH_NOARGS, "Returns latitude, degrees"},
+    {"GetLongitude",    NazaCanDecoder_GetLongitude, METH_NOARGS, "Returns longitude, degrees"},
+    {"GetAltitude",     NazaCanDecoder_GetAltitude, METH_NOARGS, "Returns altitude (barometric), m"},
+    {"GetAltitudeGps",  NazaCanDecoder_GetGpsAltitude, METH_NOARGS, "Returns altitude (GPS), m"},
+    {"GetSpeed",    NazaCanDecoder_GetSpeed, METH_NOARGS, "Returns speed (GPS), m/s"},
+    {"GetFixType",  NazaCanDecoder_GetFixType, METH_NOARGS, "Returns fix type (0 - no fix, 2 - 2D, 3 - 3D, 4 - DGPS)"},
+    {"GetNumSat",   NazaCanDecoder_GetNumSat, METH_NOARGS, "Returns number of found satellites"},
+    {"GetHeading",  NazaCanDecoder_GetHeading, METH_NOARGS, "Returns heading (compensated), degrees"},
+    {"GetHeadingNc",    NazaCanDecoder_GetHeadingNc, METH_NOARGS, "Returns heading (not compensated), degrees"},
+    {"GetCog",      NazaCanDecoder_GetCog, METH_NOARGS, "Returns course over ground, degrees"},
+    {"GetVsi",      NazaCanDecoder_GetVsi, METH_NOARGS, "Returns vertical speed (barometric), m/s"},
+    {"GetVsiGps",   NazaCanDecoder_GetVsiGps, METH_NOARGS, "Returns vertical speed (GPS), m/s"},
+    {"GetHdop",     NazaCanDecoder_GetHdop, METH_NOARGS, "Returns horizontal Dilution of Precision"},
+    {"GetVdop",     NazaCanDecoder_GetVdop, METH_NOARGS, "Returns vertical Dilution of Precision"},
+    {"GetPitch",    NazaCanDecoder_GetPitch, METH_NOARGS, "Returns pitch, degrees"},
+    {"GetRoll",     NazaCanDecoder_GetRoll, METH_NOARGS, "Returns roll, degrees"},
+    {"GetYear",     NazaCanDecoder_GetYear, METH_NOARGS, "Returns year (GPS), minus 2000"},
+    {"GetMonth",    NazaCanDecoder_GetMonth, METH_NOARGS, "Returns month (GPS)"},
+    {"GetDay",      NazaCanDecoder_GetDay, METH_NOARGS, "Returns day (GPS)"},
+    {"GetHour",     NazaCanDecoder_GetHour, METH_NOARGS, "Returns hour (GPS)"},
+    {"GetMinute",   NazaCanDecoder_GetMinute, METH_NOARGS, "Returns minute (GPS)"},
+    {"GetSecond",   NazaCanDecoder_GetSecond, METH_NOARGS, "Returns second (GPS)"},
+    {"GetBattery",  NazaCanDecoder_GetBattery, METH_NOARGS, "Returns battery voltage, mV"},
+    {"GetMotorOut", NazaCanDecoder_GetMotorOut, METH_VARARGS, "Returns motor output (8 motors total, 0 - unused, otherwise 16920~35000, 16920 = motor off)"},
+    {"GetRcIn",     NazaCanDecoder_GetRcIn, METH_VARARGS, "Returns RC stick input (10 channels total, -1000~1000)"},
+    {"GetMode",     NazaCanDecoder_GetMode, METH_NOARGS, "Returns flight mode (0 - Manual, 1 - GPS, 2 - Failsafe, 3 - Atti)"},
 #ifdef GET_SMART_BATTERY_DATA
-{"GetBatteryPercent",   NazaCanDecoder_GetBatteryPercent, METH_VARARGS, "Returns battery charge percentage (0-100%)"},
-        {"GetBatteryCell",      NazaCanDecoder_GetBatteryCell, METH_VARARGS, "Returns battery cell voltage in mV"},
+    {"GetBatteryPercent",   NazaCanDecoder_GetBatteryPercent, METH_VARARGS, "Returns battery charge percentage (0-100%)"},
+    {"GetBatteryCell",      NazaCanDecoder_GetBatteryCell, METH_VARARGS, "Returns battery cell voltage in mV"},
 #endif
-        {NULL, NULL, 0, NULL}   // обязательный член, отмечает конец списка методов
+    {NULL, NULL, 0, NULL}   // обязательный член, отмечает конец списка методов
 };
 
-static PyMemberDef NazaCanDec_members[] = {     // переменные модуля
-        {"longitude", T_FLOAT, offsetof(NazaCanDecObject, longitude), READONLY, "Longitude, degrees"},
-        {"latitude", T_FLOAT, offsetof(NazaCanDecObject, latitude), READONLY, "Latitude, degrees"},
-        {"altitude", T_FLOAT, offsetof(NazaCanDecObject, altitude), READONLY, "Altitude (barometric), m"},
-        {"gpsAltitude", T_FLOAT, offsetof(NazaCanDecObject, gpsAltitude), READONLY, "Altitude (GPS), m"},
-        {"speed", T_FLOAT, offsetof(NazaCanDecObject, speed), READONLY, "Speed (GPS), m/s"},
-        {"fix", T_INT, offsetof(NazaCanDecObject, fix), READONLY, "Fix type (0 - no fix, 2 - 2D, 3 - 3D, 4 - DGPS)"},
-        {"satellite", T_INT, offsetof(NazaCanDecObject, satellite), READONLY, "Number of found satellites"},
-        {"heading", T_FLOAT, offsetof(NazaCanDecObject, heading), READONLY, "Heading (compensated), degrees"},
-        {"headingNc", T_FLOAT, offsetof(NazaCanDecObject, headingNc), READONLY, "Heading (not compensated), degrees"},
-        {"cog", T_FLOAT, offsetof(NazaCanDecObject, cog), READONLY, "Course over ground, degrees"},
-        {"vsi", T_FLOAT, offsetof(NazaCanDecObject, vsi), READONLY, "Vertical speed (GPS), m/s"},
-        {"vsiGps", T_FLOAT, offsetof(NazaCanDecObject, gpsVsi), READONLY, "vertical speed (barometric), m/s"},
-        {"hdop", T_FLOAT, offsetof(NazaCanDecObject, hdop), READONLY, " Horizontal Dilution of Precision"},
-        {"vdop", T_FLOAT, offsetof(NazaCanDecObject, vdop), READONLY, " Vertical Dilution of Precision"},
-        {"pitch", T_INT, offsetof(NazaCanDecObject, pitch), READONLY, "Pitch, degrees"},
-        {"roll", T_INT, offsetof(NazaCanDecObject, roll), READONLY, "Roll, degrees"},
-        {"year", T_INT, offsetof(NazaCanDecObject, year), READONLY, "Year (GPS), minus 2000"},
-        {"month", T_INT, offsetof(NazaCanDecObject, month), READONLY, "Month (GPS)"},
-        {"day", T_INT, offsetof(NazaCanDecObject, day), READONLY, "Day (GPS)"},
-        {"hour", T_INT, offsetof(NazaCanDecObject, hour), READONLY, "Hour (GPS)"},
-        {"minute", T_INT, offsetof(NazaCanDecObject, minute), READONLY, "Minute (GPS)"},
-        {"second", T_INT, offsetof(NazaCanDecObject, second), READONLY, "Second (GPS)"},
-        {"battery", T_INT, offsetof(NazaCanDecObject, battery), READONLY, "Battery voltage, mV"},
-        {"mode", T_INT, offsetof(NazaCanDecObject, mode), READONLY, "Flight mode (0 - Manual, 1 - GPS, 2 - Failsafe, 3 - Atti)"},
+static PyMemberDef NazaCanDec_members[] =   // переменные модуля
+{
+    {"longitude", T_FLOAT, offsetof(NazaCanDecObject, longitude), READONLY, "Longitude, degrees"},
+    {"latitude", T_FLOAT, offsetof(NazaCanDecObject, latitude), READONLY, "Latitude, degrees"},
+    {"altitude", T_FLOAT, offsetof(NazaCanDecObject, altitude), READONLY, "Altitude (barometric), m"},
+    {"gpsAltitude", T_FLOAT, offsetof(NazaCanDecObject, gpsAltitude), READONLY, "Altitude (GPS), m"},
+    {"speed", T_FLOAT, offsetof(NazaCanDecObject, speed), READONLY, "Speed (GPS), m/s"},
+    {"fix", T_INT, offsetof(NazaCanDecObject, fix), READONLY, "Fix type (0 - no fix, 2 - 2D, 3 - 3D, 4 - DGPS)"},
+    {"satellite", T_INT, offsetof(NazaCanDecObject, satellite), READONLY, "Number of found satellites"},
+    {"heading", T_FLOAT, offsetof(NazaCanDecObject, heading), READONLY, "Heading (compensated), degrees"},
+    {"headingNc", T_FLOAT, offsetof(NazaCanDecObject, headingNc), READONLY, "Heading (not compensated), degrees"},
+    {"cog", T_FLOAT, offsetof(NazaCanDecObject, cog), READONLY, "Course over ground, degrees"},
+    {"vsi", T_FLOAT, offsetof(NazaCanDecObject, vsi), READONLY, "Vertical speed (GPS), m/s"},
+    {"vsiGps", T_FLOAT, offsetof(NazaCanDecObject, gpsVsi), READONLY, "vertical speed (barometric), m/s"},
+    {"hdop", T_FLOAT, offsetof(NazaCanDecObject, hdop), READONLY, " Horizontal Dilution of Precision"},
+    {"vdop", T_FLOAT, offsetof(NazaCanDecObject, vdop), READONLY, " Vertical Dilution of Precision"},
+    {"pitch", T_INT, offsetof(NazaCanDecObject, pitch), READONLY, "Pitch, degrees"},
+    {"roll", T_INT, offsetof(NazaCanDecObject, roll), READONLY, "Roll, degrees"},
+    {"year", T_INT, offsetof(NazaCanDecObject, year), READONLY, "Year (GPS), minus 2000"},
+    {"month", T_INT, offsetof(NazaCanDecObject, month), READONLY, "Month (GPS)"},
+    {"day", T_INT, offsetof(NazaCanDecObject, day), READONLY, "Day (GPS)"},
+    {"hour", T_INT, offsetof(NazaCanDecObject, hour), READONLY, "Hour (GPS)"},
+    {"minute", T_INT, offsetof(NazaCanDecObject, minute), READONLY, "Minute (GPS)"},
+    {"second", T_INT, offsetof(NazaCanDecObject, second), READONLY, "Second (GPS)"},
+    {"battery", T_INT, offsetof(NazaCanDecObject, battery), READONLY, "Battery voltage, mV"},
+    {"mode", T_INT, offsetof(NazaCanDecObject, mode), READONLY, "Flight mode (0 - Manual, 1 - GPS, 2 - Failsafe, 3 - Atti)"},
 #ifdef GET_SMART_BATTERY_DATA
-        {"batteryPercent", T_INT, offsetof(NazaCanDecObject, batteryPercent), READONLY, "Battery charge percentage (0-100%)"},
+    {"batteryPercent", T_INT, offsetof(NazaCanDecObject, batteryPercent), READONLY, "Battery charge percentage (0-100%)"},
 #endif
-        {NULL}  // завершение списка
+    {NULL}  // завершение списка
 };
 
-static struct PyModuleDef NazaCanDecoderModule = {  // описание модуля
-        PyModuleDef_HEAD_INIT,
-        "NazaCanDecoder",
-        NULL,
-        -1,
-        NazaCanDecoderMethods
+static struct PyModuleDef NazaCanDecoderModule =    // описание модуля
+{
+    PyModuleDef_HEAD_INIT,  // обязательный заголовок (видимо)
+    "NazaCanDecoder",   // название модуля
+    NULL,   // модуль документации (которого нет)
+    -1,     // размер состояния модуля для пре-интерпретатора (? не очень  понял что это, см. документацию)
+    NazaCanDecoderMethods   // методы модуля
 };
 
-static PyTypeObject Decoder_Type = { // описание нового объекта Python
-        PyVarObject_HEAD_INIT(NULL, 0)
-        "NazaCanDecoder.Decoder",       // tp_name
-        sizeof(NazaCanDecObject),       // basic size
-        0,                              // tp_itemsize
-        (destructor)NazaCanDecoder_dealloc, // tp_dealloc
-        0,                                  // tp_print
-        0,                              // tp_getattr
-        0,                              // tp_setattr
-        0,                              // tp_reserved
-        0,                              // tp_repr
-        0,                              // tp_as_number
-        0,                              // tp_as_sequence
-        0,                              // tp_as_mapping
-        0,                              // tp_hash
-        0,                              // tp_call
-        0,                              // tp_str
-        0,                              // tp_getattro
-        0,                              // tp_setattro
-        0,                              // tp_as_buffer
-        Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   // tp_flags
-        "Decoder object",               // tp_doc
-        0,                              // tp_traverse
-        0,                              // tp_clear
-        0,                              // tp_richcompare
-        0,                              // tp_weaklistoffset
-        0,                              // tp_iter
-        0,                              // tp_iternext
-        NazaCanDecoderMethods,          // tp_methods
-        0,                              // tp_members
-        0,                              // tp_getset
-        0,                              // tp_base
-        0,                              // tp_dict
-        0,                              // tp_descr_get
-        0,                              // tp_descr_set
-        0,                              // tp_dictoffset
-        (initproc)NazaCanDecoder_init,  // tp_init
-        0,                              // tp_alloc
-        NazaCanDecoder_new,             // tp_new
+static PyTypeObject Decoder_Type =  // описание нового объекта Python
+{
+    PyVarObject_HEAD_INIT(NULL, 0)
+    "NazaCanDecoder.Decoder",       // tp_name
+    sizeof(NazaCanDecObject),       // basic size
+    0,                              // tp_itemsize
+    (destructor)NazaCanDecoder_dealloc, // tp_dealloc
+    0,                                  // tp_print
+    0,                              // tp_getattr
+    0,                              // tp_setattr
+    0,                              // tp_reserved
+    0,                              // tp_repr
+    0,                              // tp_as_number
+    0,                              // tp_as_sequence
+    0,                              // tp_as_mapping
+    0,                              // tp_hash
+    0,                              // tp_call
+    0,                              // tp_str
+    0,                              // tp_getattro
+    0,                              // tp_setattro
+    0,                              // tp_as_buffer
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,   // tp_flags
+    "Decoder object",               // tp_doc
+    0,                              // tp_traverse
+    0,                              // tp_clear
+    0,                              // tp_richcompare
+    0,                              // tp_weaklistoffset
+    0,                              // tp_iter
+    0,                              // tp_iternext
+    NazaCanDecoderMethods,          // tp_methods
+    0,                              // tp_members
+    0,                              // tp_getset
+    0,                              // tp_base
+    0,                              // tp_dict
+    0,                              // tp_descr_get
+    0,                              // tp_descr_set
+    0,                              // tp_dictoffset
+    (initproc)NazaCanDecoder_init,  // tp_init
+    0,                              // tp_alloc
+    NazaCanDecoder_new,             // tp_new
 };
 #define Decoder_Check(x) ((x) -> ob_type == &Decoder_Type)        // ф-ия проверки
 
-
 PyMODINIT_FUNC
-PyInit_NazaCanDecoder() {   // инициализация модуля
+PyInit_NazaCanDecoder() // инициализация модуля
+{
     PyObject *m;
     if(PyType_Ready(&Decoder_Type) < 0) return NULL;
     m = PyModule_Create(&NazaCanDecoderModule); // создаем модуль
@@ -718,9 +712,11 @@ PyInit_NazaCanDecoder() {   // инициализация модуля
     return m;
 }
 
-int main(int argc, char *argv[]) {  // запуск библиотеки
+int main(int argc, char *argv[])    // запуск библиотеки
+{
     wchar_t *program = Py_DecodeLocale(argv[0], NULL);  // ловим параметры при инициализации
-    if(program == NULL) {   // ошибки определения параметров
+    if(program == NULL) // ошибки определения параметров
+    {
         fprintf(stderr, "Fatal error: cannot decode argv[0]\n");
         exit(1);
     }
