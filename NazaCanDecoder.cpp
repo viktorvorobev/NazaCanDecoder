@@ -74,6 +74,7 @@ void ThreadCanRead()    // тред в котором ловим посылки 
         read(canSocket, &frame, sizeof(struct can_frame));  // читаем
         Parser(frame);  // передаем для парсинга
     }
+    close(canSocket);   // закрываем порт когда закончили с ним работать
     printf("Can reading stopped\n");
 }
 
