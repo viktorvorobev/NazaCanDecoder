@@ -1,22 +1,25 @@
 #!/usr/bin/env python3
-import NazaCanDecoder   # после установки модуль подключается глобально
+import NazaCanDecoder
 import time
 
-naza = NazaCanDecoder.Decoder()    # запуск модуля с привязкой к конкретной CAN шине
-naza.Begin("can0")
-motor = [0]*8
-rcIn = [0]*10
+naza = NazaCanDecoder.Decoder()  # запуск модуля с привязкой к конкретной CAN шине
+try:
+    naza.Begin("can0")
+except NazaCanDecoder.error:
+    print("Failed to start reading")
+    exit(1)
+motor = [0] * 8
+rcIn = [0] * 10
 
 for i in range(1000):
-# while True:
-    # не требуют GPS
+    # These values are not require GPS module to be connected
     altitude = naza.GetAltitude()
-    vsi = naza.GetVsi()     #   vertical speed (barometric)
+    vertical_speed = naza.GetVsi()  # vertical speed (barometric)
     pitch = naza.GetPitch()
     roll = naza.GetRoll()
-    battery = naza.GetBattery()/1000
+    battery = naza.GetBattery() / 1000
     mode = naza.GetMode()
-    heading = naza.GetHeading()         # курс от кватерниона (видимо еще и от гироскопа)
+    heading = naza.GetHeading()
     if mode == 0:
         modeStr = 'manual'
     elif mode == 1:
@@ -27,65 +30,58 @@ for i in range(1000):
         modeStr = 'atti'
     else:
         modeStr = 'unknown'
-    msgNoGps = 'mode: %s\tbat: %.2f\talt: %.2f\tvsi: %.2f\tpitch: %d\troll: %d\theading: %.2f' \
-               % (modeStr, battery, altitude, vsi, pitch, roll, heading)
+    msg_no_gps = 'mode: %s\tbat: %.2f\talt: %.2f\tvsi: %.2f\tpitch: %d\troll: %d\theading: %.2f' \
+                 % (modeStr, battery, altitude, vertical_speed, pitch, roll, heading)
 
-    for i in range(8):    # значения посылаемые на моторы
+    for i in range(8):  # these are values that are sent to motors
         motor[i] = naza.GetMotorOut(i)
-    msgMotors = 'M1: %d\tM2: %d\tM3: %d\tM4: %d\tM5: %d\tM6: %d\tF1: %d\tF2: %d\t' \
-                % (motor[0], motor[1], motor[2], motor[3], motor[4], motor[5], motor[6], motor[7])
+    msg_motors = 'M1: %d\tM2: %d\tM3: %d\tM4: %d\tM5: %d\tM6: %d\tF1: %d\tF2: %d\t' \
+                 % (motor[0], motor[1], motor[2], motor[3], motor[4], motor[5], motor[6], motor[7])
 
-    for i in range(10):     # значения получаемые с каналов пульта
+    for i in range(10):  # these are readings from te remote
         rcIn[i] = naza.GetRcIn(i)
-    msgRcIn = 'un1: %d\tRcA: %d\tRcE: %d\tRcR: %d\tRcU: %d\t' \
-              'RcT: %d\tun2: %d\tRcX1: %d\tRcX2: %d\tun3: %d' \
-              % (rcIn[0], rcIn[1], rcIn[2], rcIn[3], rcIn[4], rcIn[5], rcIn[6], rcIn[7], rcIn[8], rcIn[9])
+    msg_rc_in = 'un1: %d\tRcA: %d\tRcE: %d\tRcR: %d\tRcU: %d\t' \
+                'RcT: %d\tun2: %d\tRcX1: %d\tRcX2: %d\tun3: %d' \
+                % (rcIn[0], rcIn[1], rcIn[2], rcIn[3], rcIn[4], rcIn[5], rcIn[6], rcIn[7], rcIn[8], rcIn[9])
 
-    # требуют GPS
-    altitudeGps = naza.GetAltitudeGps()
+    # these values are require GPS module to be connected
+    altitude_gps = naza.GetAltitudeGps()
     latitude = naza.GetLatitude()
     longitude = naza.GetLongitude()
     speed = naza.GetSpeed()
-    fixType = naza.GetFixType()
-    numSat = naza.GetNumSat()
-    cog = naza.GetCog()     # Course over ground
-    vsiGps = naza.GetVsiGps()   # vertical speed (GPS)
-    hdop = naza.GetHdop()   # horizontal Dilution of Precision
-    vdop = naza.GetVdop()   # vertical Dilution of Precision
-    headingNc = naza.GetHeadingNc()     # курс от магнетометра
+    fix_type = naza.GetFixType()
+    num_satellites = naza.GetNumSat()
+    course_over_ground = naza.GetCog()
+    vertical_speed_gps = naza.GetVsiGps()
+    hdop = naza.GetHdop()  # horizontal Dilution of Precision
+    vdop = naza.GetVdop()  # vertical Dilution of Precision
+    heading_magnetometer = naza.GetHeadingNc()
     year = naza.GetYear()
     month = naza.GetMonth()
     day = naza.GetDay()
     hour = naza.GetHour()
     min = naza.GetMinute()
     sec = naza.GetSecond()
-    if fixType == 0:
+    if fix_type == 0:
         fixTypeStr = 'NoFix'
-    elif fixType == 2:
+    elif fix_type == 2:
         fixTypeStr = '2D'
-    elif fixType == 3:
+    elif fix_type == 3:
         fixTypeStr = '3D'
-    elif fixType == 4:
+    elif fix_type == 4:
         fixTypeStr = 'DGPS'
     else:
         fixTypeStr = 'Unknown'
-    msgGps1 = 'fix: %s\tnumSat: %d\talt: %.2f\tlat: %.2f\tlon:%.2f\tspeed: %.2f' % (fixTypeStr, numSat, altitudeGps, latitude, longitude, speed)
-    msgGps2 = 'headingNc: %.2f\tcog: %.2f\tvsi: %.2f\thdop: %.2f\tvdop: %.2f\ttime: %.2d:%.2d:%.2d\t date: %.2d.%.2d.%.2d' \
-              % (headingNc, cog, vsiGps, hdop, vdop, hour, min, sec, day, month, year)
+    msg_gps_1 = 'fix: %s\tnumSat: %d\talt: %.2f\tlat: %.2f\tlon:%.2f\tspeed: %.2f' % (
+        fixTypeStr, num_satellites, altitude_gps, latitude, longitude, speed)
+    msg_gps_2 = 'headingNc: %.2f\tcog: %.2f\tvsi: %.2f\thdop: %.2f\tvdop: %.2f\ttime: %.2d:%.2d:%.2d\t date: %.2d.%.2d.%.2d' \
+                % (heading_magnetometer, course_over_ground, vertical_speed_gps, hdop, vdop, hour, min, sec, day, month,
+                   year)
 
-    # вывод сообщений
-    print(msgNoGps)     # телеметрия которой не нужен GPS
-    # print(msgMotors)    # значения, посылаемые на моторы
-    # print(msgRcIn)      # значения, получаемые с пульта
-    # print(msgGps1)      # телеметрия которой нужен GPS
-    # print(msgGps2)
+    print(msg_no_gps)
+    # print(msg_motors)
+    # print(msg_rc_in)
+    # print(msg_gps_1)
+    # print(msg_gps_2)
     time.sleep(0.01)
-naza.Stop()   # завершение работы модуля
-
-
-
-
-
-
-
-
+naza.Stop()
