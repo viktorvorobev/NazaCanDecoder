@@ -1,37 +1,31 @@
 #include "NazaCanDecoder.h"
 
-/*
- * Работа модуля.
- * Модуль работает в нескольких потоках (тредах):
- * 1) Отправка HeartBeat в CAN сеть.
- * 2) Получение сообщений из CAN сети, их парсинг.
- */
 
-int InitCanSocket(int *sock, const char* interface) // инициализация CAN
+int InitCanSocket(int *sock, const char* interface)
 {
     int s, n;
     struct sockaddr_can addr{};
     struct ifreq ifr{};
-    bool noSuchInterface = true;    // флаг, что интерфейс вообще есть
+    bool noSuchInterface = true;
     struct ifaddrs *ifaddr, *ifa;
 
-    if(getifaddrs(&ifaddr) == -1)    // получаем список всех интерфейсов
+    if(getifaddrs(&ifaddr) == -1)
     {
         perror("ERROR: Failed to get ifaddrs.");
         return -1;
     }
-    for(ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)    // ищем нужный интерфейс
-        // если нашли нужный интерфейс, и он "поднят", меняем флаг - разрешаем дальнейшую работу
-        if((!strcmp(interface, ifa->ifa_name)) && ifa->ifa_flags & IFF_UP)   // (strcmp: полное совпадение == 0)
+    for(ifa = ifaddr, n = 0; ifa != NULL; ifa = ifa->ifa_next, n++)    // search for required interface
+        // if interface is found and it's up
+        if((!strcmp(interface, ifa->ifa_name)) && ifa->ifa_flags & IFF_UP)
             noSuchInterface = false;
 
-    if(noSuchInterface)  // Ошибка что интерфейс не найден
+    if(noSuchInterface)
     {
         perror("ERROR: Interface not found or down.");
         return -2;
     }
 
-    if((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0)   // открываем порт
+    if((s = socket(PF_CAN, SOCK_RAW, CAN_RAW)) < 0)
     {
         perror("ERROR: Failed to open port.");
         return -3;
@@ -53,7 +47,7 @@ int InitCanSocket(int *sock, const char* interface) // инициализаци�
     return 0;
 }
 
-void SendHeartbeat()    // тред в котором отправляем HeartBeat метку в сеть
+void SendHeartbeat()
 {
     printf("Sending heartbeat frame...\n");
     struct can_frame frame{};
@@ -61,73 +55,79 @@ void SendHeartbeat()    // тред в котором отправляем Heart
     write(canSocket, &frame, sizeof(struct can_frame));
     frame = HEARTBEAT_2;
     write(canSocket, &frame, sizeof(struct can_frame));
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));    // ждем пока Naza отреагирует на метку
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));  // wait for Naza to react to the heart bit
     printf("Heartbeat frame sent\n");
 }
 
-void ThreadCanRead()    // тред в котором ловим посылки из CAN сети и помещаем их в FIFO буффер
+void ThreadCanRead()
 {
     printf("Can reading thread started\n");
     struct can_frame frame{};
     while(!stop)
     {
-        read(canSocket, &frame, sizeof(struct can_frame));  // читаем
-        Parser(frame);  // передаем для парсинга
+        read(canSocket, &frame, sizeof(struct can_frame));
+        Parser(frame);
     }
-    close(canSocket);   // закрываем порт когда закончили с ним работать
+    close(canSocket);
     printf("Can reading stopped\n");
 }
 
-void Parser(struct can_frame frame) // функция, которая парсит сообщения
+void Parser(struct can_frame frame)
 {
     uint16_t msgId = NAZA_MESSAGE_NONE;
     struct can_frame canMsg = frame;
 
-    if(canMsg.can_id == 0x090) canMsgIdIdx = 0;  // смотрим от кого пришло сообщение
+    if(canMsg.can_id == 0x090) canMsgIdIdx = 0;  // who sent the message
     else if(canMsg.can_id == 0x108) canMsgIdIdx = 1;
     else if(canMsg.can_id == 0x7F8) canMsgIdIdx = 2;
-    else return;  // если сообщение прилетело от кого-то еще - пропускаем его
+    else return;  // ignore if id is unknown
 
-    for(uint8_t i = 0; i < canMsg.can_dlc; i++) // смотрим на каждый байт сообщения
+    for(uint8_t i = 0; i < canMsg.can_dlc; i++) // look through every byte
     {
         canMsgByte = canMsg.data[i];
-        if(collectData[canMsgIdIdx] == 1)
+        if(collectData[canMsgIdIdx] == 1) // we're collecting message to the buffer
         {
-            msgBuf[canMsgIdIdx].bytes[msgIdx[canMsgIdIdx]] = canMsgByte;  // записываем сообщение в буффер
-            if(msgIdx[canMsgIdIdx] == 3)    // если получили 4 байта - получаем длину сообщения
+            msgBuf[canMsgIdIdx].bytes[msgIdx[canMsgIdIdx]] = canMsgByte;
+            if(msgIdx[canMsgIdIdx] == 3)    // we've received header, so we can record msg len
                 msgLen[canMsgIdIdx] = msgBuf[canMsgIdIdx].header.len;
-            msgIdx[canMsgIdIdx] += 1;   // увеличиваем счетчик (на каком байте мы сейчас)
-            // если собрали все байты сообщения - прекращаем собирать
-            // (+8 тк: 2 - Id сообщения, 2 - Длина сообщения, 4 - завершающая последовательность)
+            msgIdx[canMsgIdIdx] += 1;
+            // if msg len is more than 256 (max) or more than expected + header and footer
+            // we start all over again
             if((msgIdx[canMsgIdIdx] > (msgLen[canMsgIdIdx] + 8)) || (msgIdx[canMsgIdIdx] > 256))
                 collectData[canMsgIdIdx] = 0;
         }
 
-        // ищем начальную последовательность (0x55 0xAA 0x55 0xAA)
+        /* looking for header (0x55 0xAA 0x55 0xAA)
+        * received 0x55 and header == 0 --> header = 1
+        * received 0xAA and header == 1 --> header = 2
+        * received 0x55 and header == 2 --> header = 3
+        * received 0xAA and header == 3 --> header = 0 - start over and start collecting bytes to msg buffer
+        * in any other case - header = 0 - msg is simply ignored
+        */
         if(canMsgByte == 0x55)
         {
-            if(header[canMsgIdIdx] == 0)    // пользуемся счетчиком, чтобы понять какой это байт последовательности
+            if(header[canMsgIdIdx] == 0)
                 header[canMsgIdIdx] = 1;
             else if(header[canMsgIdIdx] == 2)
                 header[canMsgIdIdx] = 3;
-            else header[canMsgIdIdx] = 0;   // если упустили последовательность - начинаем заново
+            else header[canMsgIdIdx] = 0;
         }
         else if(canMsgByte == 0xAA)
         {
             if(header[canMsgIdIdx] == 1)
                 header[canMsgIdIdx] = 2;
-            else if(header[canMsgIdIdx] == 3) // как только последовательность найдена
+            else if(header[canMsgIdIdx] == 3)
             {
-                header[canMsgIdIdx] = 0;    // сбрасываем счетчик
-                collectData[canMsgIdIdx] = 1;   // поднимаем флаг, чтобы набирать буффер
-                msgIdx[canMsgIdIdx] = 0;    // обнуляем счетчик байт в сообщении
+                header[canMsgIdIdx] = 0;
+                collectData[canMsgIdIdx] = 1;
+                msgIdx[canMsgIdIdx] = 0;
             }
-            else header[canMsgIdIdx] = 0;   // если упустили последовательность - начинаем заново
+            else header[canMsgIdIdx] = 0;
         }
         else header[canMsgIdIdx] = 0;
 
-        // ищем завершающую последовательность (0x66 0xCC 0x66 0xCC)
-        if(canMsgByte == 0x66)  // аналогично начальной
+        // looking for footer in the same way as with the header (0x66 0xCC 0x66 0xCC)
+        if(canMsgByte == 0x66)
         {
             if(footer[canMsgIdIdx] == 0)
                 footer[canMsgIdIdx] = 1;
@@ -142,19 +142,19 @@ void Parser(struct can_frame frame) // функция, которая парси
             else if(footer[canMsgIdIdx] == 3)
             {
                 footer[canMsgIdIdx] = 0;
-                if(collectData[canMsgIdIdx] != 0)   // как только нашли - прекращаем собирать буффер сообщений
-                    collectData[canMsgIdIdx] = 2;   // парсим сообщение
+                if(collectData[canMsgIdIdx] != 0)
+                    collectData[canMsgIdIdx] = 2; // we're ready to parse
             }
             else footer[canMsgIdIdx] = 0;
         }
         else footer[canMsgIdIdx] = 0;
 
-        // парсинг сообщений
+
         if(collectData[canMsgIdIdx] == 2)
         {
-            if(msgIdx[canMsgIdIdx] == (msgLen[canMsgIdIdx] + 8))    // проверяем, что сообщение пришло целиком
+            if(msgIdx[canMsgIdIdx] == (msgLen[canMsgIdIdx] + 8))    // ensure that length is correct
             {
-                if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1002)    // парсим в зависимости от ID
+                if(msgBuf[canMsgIdIdx].header.id == NAZA_MESSAGE_MSG1002)
                 {
                     float magCalX = msgBuf[canMsgIdIdx].msg1002.magCalX;
                     float magCalY = msgBuf[canMsgIdIdx].msg1002.magCalY;
@@ -186,7 +186,7 @@ void Parser(struct can_frame frame) // функция, которая парси
                     minute = dateTime & 0b00111111; dateTime >>= 6;
                     hour = dateTime & 0b00001111; dateTime >>= 4;
                     day = dateTime & 0b00011111; dateTime >>= 5;
-                    if(hour > 7) day++; //TODO: разобраться с часовыми поясами
+                    if(hour > 7) day++; //TODO: handle time zones
                     month = dateTime & 0b00001111; dateTime >>= 4;
                     year = dateTime & 0b01111111;
                     gpsVsi = -msgBuf[canMsgIdIdx].msg1003.downVelocity;
@@ -239,7 +239,7 @@ void Parser(struct can_frame frame) // функция, которая парси
 
 int Begin(const char* canBus)
 {
-    // создаем HeartBeat сообщения
+    // Heartbeat sequence
     HEARTBEAT_1.can_id = 0x108;
     HEARTBEAT_1.data[0] = 0x55;
     HEARTBEAT_1.data[1] = 0xAA;
@@ -258,7 +258,6 @@ int Begin(const char* canBus)
     HEARTBEAT_2.data[3] = 0xCC;
     HEARTBEAT_2.can_dlc = 4;
 
-    // создаем маски
 //    FILTER_MASK.can_id = 0x7FF;
 //    FILTER_090.can_id = 0x090;
 //    FILTER_108.can_id = 0x108;
@@ -277,98 +276,97 @@ int Begin(const char* canBus)
     return 0;
 }
 
-int Stop()  // функция останавливающая все треды
+int Stop()  // exit method
 {
     printf("Stopping threads...\n");
     stop = true;
     return 0;
 }
 
-// функции, возвращающие значения
-double GetLatitude() {return latitude;}	// возвращает широту в градусах
-double GetLongitude() {return longitude;}	// возвращает долготу в градусах
-double GetAltitude() {return altitude;}	// возвращает высоту в метрах (от барометра)
-double GetGpsAltitude() {return gpsAltitude;}	// возвращает высоту в метрах (от GPS)
-double GetSpeed() {return speed;}	// возвращает скорость в м/с
-fixType_t GetFixType() {return fix;}	// возвращает тип фиксации
-uint8_t GetNumSat() {return satellite;}	// возвращает кол-во найденных спутников
-double GetHeading() {return heading;}	// возвращает курс в градусах (c компенсацией наклона)
-double GetHeadingNc() {return headingNc;}	// возвращает курс в градусах (без компенсации наклона)
-double GetCog() {return cog;}		// возвращает курс над землей в градусах (относительно сторон света)
-double GetVsi() {return vsi;}		// возвращает скорость набора высоты в м/с (от барометра)
-double GetVsiGps() {return gpsVsi;}	// возвращает скорость набора высоты в м/с (от GPS)
-double GetHdop() {return hdop;}	// возвращает горизонтальный DOP (dilution of precision)
-double GetVdop() {return vdop;}	// возрващает вертикальный DOP (dilution of precision)
-int8_t GetPitch() {return pitch;}	// возвращает угол тангажа в градусах
-int16_t GetRoll() {return roll;}	// возвращает угол крена в градусах
-uint8_t GetYear() {return year;}	// возвращает год от GPS (последние 2 цифры)
-uint8_t GetMonth() {return month;}	// возвращает месяц от GPS
-uint8_t GetDay() {return day;}		// возвращает число от GPS
-uint8_t GetHour() {return hour;}	// возвращает часы от GPS (для времени от 16:00 до 23:59 GPS возвращает 0:00 - 7:59)
-uint8_t GetMinute() {return minute;}	// возвращает минуты от GPS
-uint8_t GetSecond() {return second;}	// возвращает секунды от GPS
-uint16_t GetBattery() {return battery;}	// возвращает напряжение батарейки в мВ
-uint16_t GetMotorOutput(int mot) {return motorOut[mot];}	// возвращает значение подаваемое на мотор (0 - не используется, иначе 16920~35000, 16920 = мотор выкл)
-int16_t GetRcIn(int chan) {return rcIn[chan];}		// возвращает значение получаемое от джойстика для каждого канала (-1000~1000)
-flyMode_t GetMode() {return mode;}	// возвращает текущий режим работы
+double GetLatitude() {return latitude;}
+double GetLongitude() {return longitude;}
+double GetAltitude() {return altitude;}
+double GetGpsAltitude() {return gpsAltitude;}
+double GetSpeed() {return speed;}
+fixType_t GetFixType() {return fix;}
+uint8_t GetNumSat() {return satellite;}
+double GetHeading() {return heading;}
+double GetHeadingNc() {return headingNc;}
+double GetCog() {return cog;}
+double GetVsi() {return vsi;}
+double GetVsiGps() {return gpsVsi;}
+double GetHdop() {return hdop;}
+double GetVdop() {return vdop;}
+int8_t GetPitch() {return pitch;}
+int16_t GetRoll() {return roll;}
+uint8_t GetYear() {return year;}
+uint8_t GetMonth() {return month;}
+uint8_t GetDay() {return day;}
+uint8_t GetHour() {return hour;}
+uint8_t GetMinute() {return minute;}
+uint8_t GetSecond() {return second;}
+uint16_t GetBattery() {return battery;}
+uint16_t GetMotorOutput(int mot) {return motorOut[mot];}
+int16_t GetRcIn(int chan) {return rcIn[chan];}
+flyMode_t GetMode() {return mode;}
 #ifdef GET_SMART_BATTERY_DATA
-uint8_t GetBatteryPercent(){return batteryPercent;}	// возвращает заряд батареи в процентах
-uint16_t GetBatteryCell(int cell) {return batteryCell[cell];}	// возвращает напряжение банки в мВ
+uint8_t GetBatteryPercent(){return batteryPercent;}
+uint16_t GetBatteryCell(int cell) {return batteryCell[cell];}
 #endif
 
 /*
- * Дальше все что нужно для питона
+ * Everything below required to work with python
  */
 
 static PyObject *NCDError;  //Naza Can Decoder Error
 
-typedef struct  // структура объекта, не должна быть пустой, скорее всего потом я что-нибудь отсюда уберу
+typedef struct
 {
     PyObject_HEAD
-    double longitude;	// долгота (град)
-    double latitude;	// широта (град)
-    double altitude;	// высота по барометру (м)
-    double gpsAltitude;	// высота по GPS (м)
-    double speed;		// скорость (м/с)
-    uint8_t fix;		// тип фиксации
-    uint8_t satellite;	// кол-во спутников
-    double heading;		// курс в градусах (с компенсацией наклона)
-    double headingNc;	// курс в градусах (без компенсации наклона)
-    double cog;			// "курс над землей" относительно сторон света
-    double vsi;			// скорость набора высоты по барометру (м/с)
-    double gpsVsi;		// скорость набора высоты по GPS (м/с)
-    double hdop;		// горизонтальный DOP
-    double vdop;		// вертикальный DOP
-    int8_t pitch;		// угол тангажа (градусы)
-    int16_t roll;		// угол крена (радианы)
-    uint8_t year;		// год (минус 2000)
-    uint8_t month;		// месяц
-    uint8_t day;		// число
-    uint8_t hour;		// часы
-    uint8_t minute;		// минуты
-    uint8_t second;		// секунды
-    uint16_t battery;	// напряжение аккумулятора (мВ)
-    uint8_t mode;		// режим полета
+    double longitude;	// degree
+    double latitude;	// degree
+    double altitude;	// barometric altitude (m)
+    double gpsAltitude;	// m
+    double speed;		// m/s
+    uint8_t fix;
+    uint8_t satellite;
+    double heading;     // degree, with tilt compensation
+    double headingNc;	// degree, without tilt compensation
+    double cog;			// course over ground
+    double vsi;			// barometric vertical speed (m/s)
+    double gpsVsi;		// GPS vertical speed (m/s)
+    double hdop;		// horizontal DOP
+    double vdop;		// vertical DOP
+    int8_t pitch;
+    int16_t roll;
+    uint8_t year;		// last 2 numbers
+    uint8_t month;
+    uint8_t day;
+    uint8_t hour;
+    uint8_t minute;
+    uint8_t second;
+    uint16_t battery;
+    uint8_t mode;
 #ifdef GET_SMART_BATTERY_DATA
-    uint8_t batteryPercent;		// заряд аккумулятора (%)
+    uint8_t batteryPercent;
 #endif
 } NazaCanDecObject;
 
-static void NazaCanDecoder_dealloc(NazaCanDecObject* self)  // деструктор, очищает память при удалении объекта
+static void NazaCanDecoder_dealloc(NazaCanDecObject* self)  // destructor
 {
     Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static int NazaCanDecoder_init(NazaCanDecObject* self, PyObject *args)  // инициализация класса
+static int NazaCanDecoder_init(NazaCanDecObject* self, PyObject *args)  // class initialisation
 {
     return 0;
 }
 
-static PyObject* NazaCanDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds) // конструктор класса
+static PyObject* NazaCanDecoder_new(PyTypeObject *type, PyObject *args, PyObject *kwds) // class constructor
 {
-    NazaCanDecObject* self; // объявляем что self'ом теперь будет объявленная ранее структура
+    NazaCanDecObject* self; // self is the structure from above
     self = (NazaCanDecObject *)type->tp_alloc(type, 0);
-    if(self != NULL)    // обнуление переменных
+    if(self != NULL)    // cleanup variables
     {
         self -> longitude = 0;
         self -> latitude = 0;
@@ -402,14 +400,14 @@ static PyObject* NazaCanDecoder_new(PyTypeObject *type, PyObject *args, PyObject
 }
 
 
-// метод Begin, запускает треды, прослушивание CAN, парсинг сообщений, онлайн метки, аргумент - имя шины CAN
+// Begin method, launches everything. Argument - name of the CAN bus
 static PyObject * NazaCanDecoder_Begin(PyObject *self, PyObject *args)
 {
     const char *canBus;
-    int ret;    // результат выполнения функции Begin
-    if(!PyArg_ParseTuple(args, "s", &canBus)) return NULL;  // пробуем парсить строку
+    int ret;    // result of Begin call
+    if(!PyArg_ParseTuple(args, "s", &canBus)) return NULL;
     ret = Begin(canBus);
-    if(ret != 0)    // смотрим на результат выполнения команды
+    if(ret != 0)
     {
         PyErr_SetString(NCDError, "Begin failed");
         return NULL;
@@ -417,156 +415,156 @@ static PyObject * NazaCanDecoder_Begin(PyObject *self, PyObject *args)
     return PyLong_FromLong(ret);
 }
 
-// метод Stop - останавливает все треды
+// Stop method
 static PyObject * NazaCanDecoder_Stop(PyObject *self, PyObject *args)
 {
     int ret = Stop();
     PyLong_FromLong(ret);
 }
 
-// методы возвращающие посчитанные значения
-static PyObject * NazaCanDecoder_GetLatitude(PyObject *self, PyObject *args)    // широта
+// getter methods
+static PyObject * NazaCanDecoder_GetLatitude(PyObject *self, PyObject *args)
 {
     double ret = GetLatitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetLongitude(PyObject *self, PyObject *args)   // долгода
+static PyObject * NazaCanDecoder_GetLongitude(PyObject *self, PyObject *args)
 {
     double ret = GetLongitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetAltitude(PyObject *self, PyObject *args)    // высота по барометру
+static PyObject * NazaCanDecoder_GetAltitude(PyObject *self, PyObject *args)
 {
     double ret = GetAltitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetGpsAltitude(PyObject *self, PyObject *args) // высота по GPS
+static PyObject * NazaCanDecoder_GetGpsAltitude(PyObject *self, PyObject *args)
 {
     double ret = GetGpsAltitude();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetSpeed(PyObject *self, PyObject *args)   // скорость
+static PyObject * NazaCanDecoder_GetSpeed(PyObject *self, PyObject *args)
 {
     double ret = GetSpeed();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetFixType(PyObject *self, PyObject *args) // тип фиксации
+static PyObject * NazaCanDecoder_GetFixType(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetFixType();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetNumSat(PyObject *self, PyObject *args)  // кол-во спутников
+static PyObject * NazaCanDecoder_GetNumSat(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetNumSat();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetHeading(PyObject *self, PyObject *args) // курс
+static PyObject * NazaCanDecoder_GetHeading(PyObject *self, PyObject *args)
 {
 
     double ret = GetHeading();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetHeadingNc(PyObject *self, PyObject *args)   // курс без компенсации наклона
+static PyObject * NazaCanDecoder_GetHeadingNc(PyObject *self, PyObject *args)
 {
     double ret = GetHeadingNc();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetCog(PyObject *self, PyObject *args) // курс над землей
+static PyObject * NazaCanDecoder_GetCog(PyObject *self, PyObject *args)
 {
     double ret = GetCog();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetVsi(PyObject *self, PyObject *args) // скорость набора высоты (барометр)
+static PyObject * NazaCanDecoder_GetVsi(PyObject *self, PyObject *args)
 {
     double ret = GetVsi();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetVsiGps(PyObject *self, PyObject *args)  // скорость набора высоты (GPS)
+static PyObject * NazaCanDecoder_GetVsiGps(PyObject *self, PyObject *args)
 {
     double ret = GetVsiGps();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetHdop(PyObject *self, PyObject *args)    // горизонтальный DOP
+static PyObject * NazaCanDecoder_GetHdop(PyObject *self, PyObject *args)
 {
     double ret = GetHdop();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetVdop(PyObject *self, PyObject *args)    // вертикальный DOP
+static PyObject * NazaCanDecoder_GetVdop(PyObject *self, PyObject *args)
 {
     double ret = GetVdop();
     PyFloat_FromDouble(ret);
 }
-static PyObject * NazaCanDecoder_GetPitch(PyObject *self, PyObject *args)   // угол тангажа, град
+static PyObject * NazaCanDecoder_GetPitch(PyObject *self, PyObject *args)
 {
     int8_t ret = GetPitch();
     PyLong_FromSsize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetRoll(PyObject *self, PyObject *args)    // угол крена, град
+static PyObject * NazaCanDecoder_GetRoll(PyObject *self, PyObject *args)
 {
     int16_t ret = GetRoll();
     PyLong_FromSsize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetYear(PyObject *self, PyObject *args)    // год
+static PyObject * NazaCanDecoder_GetYear(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetYear();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMonth(PyObject *self, PyObject *args)   // месяц
+static PyObject * NazaCanDecoder_GetMonth(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetMonth();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetDay(PyObject *self, PyObject *args) // день
+static PyObject * NazaCanDecoder_GetDay(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetDay();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetHour(PyObject *self, PyObject *args)    // час
+static PyObject * NazaCanDecoder_GetHour(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetHour();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMinute(PyObject *self, PyObject *args)  // минута
+static PyObject * NazaCanDecoder_GetMinute(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetMinute();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetSecond(PyObject *self, PyObject *args)  // секунда
+static PyObject * NazaCanDecoder_GetSecond(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetSecond();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetBattery(PyObject *self, PyObject *args) // заряд аккумулятора
+static PyObject * NazaCanDecoder_GetBattery(PyObject *self, PyObject *args)
 {
     uint16_t ret = GetBattery();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMotorOut(PyObject *self, PyObject *args)    // значение подаваемое на мотор, по номеру
+static PyObject * NazaCanDecoder_GetMotorOut(PyObject *self, PyObject *args)
 {
     int motor;
     if(!PyArg_ParseTuple(args, "i", &motor)) return NULL;
     uint16_t ret = GetMotorOutput(motor);
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetRcIn(PyObject *self, PyObject *args)    // управляющее воздействие, по каналу
+static PyObject * NazaCanDecoder_GetRcIn(PyObject *self, PyObject *args)
 {
     int channel;
     if(!PyArg_ParseTuple(args, "i", &channel)) return NULL;
     int16_t ret = GetRcIn(channel);
     PyLong_FromSsize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetMode(PyObject *self, PyObject *args)    // режим полета
+static PyObject * NazaCanDecoder_GetMode(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetMode();
     PyLong_FromSize_t(ret);
 }
 #ifdef GET_SMART_BATTERY_DATA
-static PyObject * NazaCanDecoder_GetBatteryPercent(PyObject *self, PyObject *args)  // заряд батареи
+static PyObject * NazaCanDecoder_GetBatteryPercent(PyObject *self, PyObject *args)
 {
     uint8_t ret = GetBatteryPercent();
     PyLong_FromSize_t(ret);
 }
-static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args) // заряд банки
+static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args)
 {
     int num;
     if(!PyArg_ParseTuple(args, "i", &num)) return NULL;
@@ -575,7 +573,7 @@ static PyObject * NazaCanDecoder_GetBatteryCell(PyObject *self, PyObject *args) 
 }
 #endif
 
-static PyMethodDef NazaCanDecoderMethods[] =    // методы модуля
+static PyMethodDef NazaCanDecoderMethods[] =    // module methods
 {
     {"Begin",       NazaCanDecoder_Begin, METH_VARARGS, "Starting Naza-Can Decoder threads"},
     {"Stop",        NazaCanDecoder_Stop, METH_NOARGS, "Stoping Naza Can Decoder threads"},
@@ -609,10 +607,10 @@ static PyMethodDef NazaCanDecoderMethods[] =    // методы модуля
     {"GetBatteryPercent",   NazaCanDecoder_GetBatteryPercent, METH_VARARGS, "Returns battery charge percentage (0-100%)"},
     {"GetBatteryCell",      NazaCanDecoder_GetBatteryCell, METH_VARARGS, "Returns battery cell voltage in mV"},
 #endif
-    {NULL, NULL, 0, NULL}   // обязательный член, отмечает конец списка методов
+    {NULL, NULL, 0, NULL}   // mark end of methods list
 };
 
-static PyMemberDef NazaCanDec_members[] =   // переменные модуля
+static PyMemberDef NazaCanDec_members[] =   // module variables
 {
     {"longitude", T_FLOAT, offsetof(NazaCanDecObject, longitude), READONLY, "Longitude, degrees"},
     {"latitude", T_FLOAT, offsetof(NazaCanDecObject, latitude), READONLY, "Latitude, degrees"},
@@ -641,19 +639,19 @@ static PyMemberDef NazaCanDec_members[] =   // переменные модуля
 #ifdef GET_SMART_BATTERY_DATA
     {"batteryPercent", T_INT, offsetof(NazaCanDecObject, batteryPercent), READONLY, "Battery charge percentage (0-100%)"},
 #endif
-    {NULL}  // завершение списка
+    {NULL}  // end of the list
 };
 
-static struct PyModuleDef NazaCanDecoderModule =    // описание модуля
+static struct PyModuleDef NazaCanDecoderModule =    // module description
 {
-    PyModuleDef_HEAD_INIT,  // обязательный заголовок (видимо)
-    "NazaCanDecoder",   // название модуля
-    NULL,   // модуль документации (которого нет)
-    -1,     // размер состояния модуля для пре-интерпретатора (? не очень  понял что это, см. документацию)
-    NazaCanDecoderMethods   // методы модуля
+    PyModuleDef_HEAD_INIT,
+    "NazaCanDecoder",   // name
+    NULL,   // no documentation
+    -1,     // ?
+    NazaCanDecoderMethods   // module methods
 };
 
-static PyTypeObject Decoder_Type =  // описание нового объекта Python
+static PyTypeObject Decoder_Type =  // new python object
 {
     PyVarObject_HEAD_INIT(NULL, 0)
     "NazaCanDecoder.Decoder",       // tp_name
@@ -694,16 +692,16 @@ static PyTypeObject Decoder_Type =  // описание нового объек�
     0,                              // tp_alloc
     NazaCanDecoder_new,             // tp_new
 };
-#define Decoder_Check(x) ((x) -> ob_type == &Decoder_Type)        // ф-ия проверки
+#define Decoder_Check(x) ((x) -> ob_type == &Decoder_Type)        // check
 
 PyMODINIT_FUNC
-PyInit_NazaCanDecoder() // инициализация модуля
+PyInit_NazaCanDecoder() // module init
 {
     PyObject *m;
     if(PyType_Ready(&Decoder_Type) < 0) return NULL;
-    m = PyModule_Create(&NazaCanDecoderModule); // создаем модуль
+    m = PyModule_Create(&NazaCanDecoderModule); // module creation
     if(m == NULL) return NULL;
-    NCDError = PyErr_NewException("pymod.error", NULL, NULL);  // создаем исключение
+    NCDError = PyErr_NewException("pymod.error", NULL, NULL);  // exception creation
     Py_INCREF(NCDError);
     PyModule_AddObject(m, "error", NCDError);
 
@@ -713,21 +711,21 @@ PyInit_NazaCanDecoder() // инициализация модуля
     return m;
 }
 
-int main(int argc, char *argv[])    // запуск библиотеки
+int main(int argc, char *argv[])    // module launch
 {
-    wchar_t *program = Py_DecodeLocale(argv[0], NULL);  // ловим параметры при инициализации
-    if(program == NULL) // ошибки определения параметров
+    wchar_t *program = Py_DecodeLocale(argv[0], NULL);  // init parameters
+    if(program == NULL) // error of parameters init
     {
         fprintf(stderr, "Fatal error: cannot decode argv[0]\n");
         exit(1);
     }
-    // говорим какая функция отвечает за инициализацию модуля
+    // mark init module method
     PyImport_AppendInittab("NazaCanDecoder",PyInit_NazaCanDecoder);
-    // передаем argv[0] интерпретатору питона
+    // pass argv[0] to python
     Py_SetProgramName(program);
-    // инициализируем питон
+    // init python
     Py_Initialize();
-    // импортируем модуль
+    // import module
     PyImport_ImportModule("NazaCanDecoder");
     PyMem_RawFree(program);
     return 0;
